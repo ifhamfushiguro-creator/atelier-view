@@ -9,6 +9,45 @@ export interface ReconstructResponse {
   isVideoReconstructed: boolean;
 }
 
+export interface StoredProject {
+  projectId: string;
+  title: string;
+  modelUrl: string;
+  pinCode: string;
+  designerToken: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export const PROJECTS_DB_PATH = path.resolve(process.cwd(), 'public', 'uploads', 'projects-db.json');
+
+export function loadProjectsDatabase(): Record<string, StoredProject> {
+  try {
+    if (!fs.existsSync(PROJECTS_DB_PATH)) {
+      return {};
+    }
+    const raw = fs.readFileSync(PROJECTS_DB_PATH, 'utf-8');
+    if (!raw.trim()) return {};
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('Failed to read projects database:', err);
+    return {};
+  }
+}
+
+export function saveProjectsDatabase(data: Record<string, StoredProject>): void {
+  try {
+    const dir = path.dirname(PROJECTS_DB_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const tmp = `${PROJECTS_DB_PATH}.tmp.${Date.now()}`;
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+    fs.renameSync(tmp, PROJECTS_DB_PATH);
+  } catch (err) {
+    console.error('Failed to persist projects database:', err);
+    throw err;
+  }
+}
+
 export async function reconstructVideoFrames(
   framesBase64: string[],
   fileName: string = 'video_room'
@@ -145,6 +184,148 @@ app.post('/api/3d/reconstruct-video', async (req, res) => {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Reconstruction failed';
     return res.status(500).json({ error: msg });
+  }
+});
+
+// 1. Save or update a project with PIN protection
+app.post('/api/projects/save', (req, res) => {
+  try {
+    const { projectId, title, modelUrl, pinCode, designerToken } = req.body || {};
+    const headerToken = req.headers['x-designer-token'] as string | undefined;
+    const effectiveToken = (designerToken || headerToken || '').trim();
+
+    if (!effectiveToken) {
+      return res.status(400).json({ error: 'Designer token is required' });
+    }
+
+    if (!modelUrl || typeof modelUrl !== 'string') {
+      return res.status(400).json({ error: 'Model URL is required' });
+    }
+
+    const cleanPin = typeof pinCode === 'string' ? pinCode.trim() : String(pinCode || '').trim();
+    if (!/^\d{4,6}$/.test(cleanPin)) {
+      return res.status(400).json({ error: 'PIN must be between 4 and 6 digits' });
+    }
+
+    const db = loadProjectsDatabase();
+    const id = projectId && String(projectId).trim()
+      ? String(projectId).trim()
+      : `proj_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = Date.now();
+
+    const existing = db[id];
+    if (existing) {
+      if (existing.designerToken && existing.designerToken !== effectiveToken) {
+        return res.status(403).json({ error: 'Unauthorized to modify this project' });
+      }
+      existing.title = (title && String(title).trim()) || existing.title || 'Untitled Space';
+      existing.modelUrl = modelUrl || existing.modelUrl;
+      existing.pinCode = cleanPin;
+      existing.updatedAt = now;
+      db[id] = existing;
+    } else {
+      db[id] = {
+        projectId: id,
+        title: (title && String(title).trim()) || 'Untitled Space',
+        modelUrl: modelUrl.trim(),
+        pinCode: cleanPin,
+        designerToken: effectiveToken,
+        createdAt: now,
+        updatedAt: now,
+      };
+    }
+
+    saveProjectsDatabase(db);
+
+    return res.status(200).json({
+      projectId: id,
+      title: db[id].title,
+      pinCode: db[id].pinCode,
+      modelUrl: db[id].modelUrl,
+    });
+  } catch (err) {
+    console.error('Error saving project:', err);
+    return res.status(500).json({ error: 'Failed to save project' });
+  }
+});
+
+// 2. Fetch all projects created by this designer (including PIN and modelUrl)
+app.get('/api/projects/my-projects', (req, res) => {
+  try {
+    const designerToken = (req.query.designerToken as string) || (req.headers['x-designer-token'] as string);
+    if (!designerToken) {
+      return res.json({ projects: [] });
+    }
+
+    const db = loadProjectsDatabase();
+    const projects = Object.values(db)
+      .filter((p) => p.designerToken === designerToken.trim())
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+
+    return res.json({ projects });
+  } catch (err) {
+    console.error('Error fetching my-projects:', err);
+    return res.status(500).json({ error: 'Failed to retrieve projects' });
+  }
+});
+
+// 3. Public metadata endpoint - CRITICAL SECURITY: Never return modelUrl or pinCode
+const handleGetPublicProject = (req: express.Request, res: express.Response) => {
+  try {
+    const projectId = String(req.params.projectId);
+    const db = loadProjectsDatabase();
+    const project = db[projectId];
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    return res.json({
+      projectId: project.projectId,
+      id: project.projectId,
+      title: project.title,
+      requiresPin: Boolean(project.pinCode),
+    });
+  } catch (err) {
+    console.error('Error retrieving public project metadata:', err);
+    return res.status(500).json({ error: 'Failed to retrieve project metadata' });
+  }
+};
+
+app.get('/api/projects/:projectId/public', handleGetPublicProject);
+app.get('/api/projects/:projectId/meta', handleGetPublicProject);
+
+// 4. Verify PIN endpoint - returns modelUrl only upon correct PIN
+app.post('/api/projects/:projectId/verify-pin', (req, res) => {
+  try {
+    const projectId = String(req.params.projectId);
+    const { pinCode } = req.body || {};
+
+    const db = loadProjectsDatabase();
+    const project = db[projectId];
+
+    if (!project) {
+      return res.status(404).json({ verified: false, error: 'Project not found' });
+    }
+
+    const cleanInputPin = typeof pinCode === 'string' ? pinCode.trim() : String(pinCode || '').trim();
+    const storedPin = String(project.pinCode || '').trim();
+
+    if (!storedPin || cleanInputPin === storedPin) {
+      return res.json({
+        verified: true,
+        modelUrl: project.modelUrl,
+        title: project.title,
+      });
+    }
+
+    return res.status(401).json({
+      verified: false,
+      error: 'Invalid access code',
+    });
+  } catch (err) {
+    console.error('Error verifying project PIN:', err);
+    return res.status(500).json({ verified: false, error: 'Failed to verify access code' });
   }
 });
 
