@@ -3,6 +3,12 @@
 You are running in **Developer A's** workspace for **Atelier View**.
 Read `AGENTS.md` first.
 
+## PONYTAIL ANTI-SLOP CORE RULES (`DietrichGebert/ponytail`)
+Permanent standard for all backend tasks:
+- **Smallest Complete Diff:** Solve problems with the least code necessary. Deletion beats addition.
+- **Inspect Before Editing:** Grep every caller, import, export, and test before changing a function signature or API contract.
+- **Zero AI Slop:** Never write robotic AI comments repeating obvious syntax, dead wrapper functions, or speculative unused abstractions.
+
 ## YOUR STRICT FILE BOUNDARIES
 ✅ **YOU MAY EDIT:**
 - `server.ts`
@@ -16,18 +22,24 @@ Read `AGENTS.md` first.
 - `src/components/canvas/street-view-viewer.tsx`
 - `src/lib/3d/simple-normalizer.ts`
 - `src/components/ui/**`
-- `src/app/page.tsx` (Instead of editing `src/app/page.tsx` directly, build standalone components in `src/components/security/` and provide a 3-to-5 line integration snippet for Flux to paste into `src/app/page.tsx`).
+- `src/app/page.tsx` (Instead of editing `src/app/page.tsx` directly, build standalone components in `src/components/security/` and provide a minimal integration snippet for Flux).
 
 ## YOUR CORE RESPONSIBILITIES
-1. **Video-to-GLB Reliability (`src/lib/3d/video-to-glb-builder.ts` & `server.ts`):**
-   - Ensure browser frame extraction divides the video into 8–10 uniform time buckets and picks the sharpest frame per bucket (using Laplacian variance) so `MASt3R` gets wide multi-angle room coverage instead of 8 identical frames from 1 second of video.
-   - Downscale extracted frames to max `1024px` JPEG (`0.85` quality) before uploading so payloads are fast (<2MB total).
-   - In `server.ts` (`/api/3d/reconstruct-video`), pass `process.env.HF_TOKEN` (if present) to `@gradio/client` when connecting to `naver/MASt3R` and `facebook/vggt` to get 5x higher free Hugging Face ZeroGPU quota and avoid rate-limit crashes.
-2. **Real Backend Security & PIN Access Control (`server.ts` & `src/components/security/`):**
-   - Implement the Designer PIN flow:
-     - When a designer creates/uploads a model, they set a 4–6 digit PIN (or auto-generate one).
-     - The designer can view/copy/change their saved PIN anytime inside a Settings/Profile modal (`DesignerPinSettings.tsx`).
-     - When a client opens a shared project link (`?project=<id>`), `GET /api/projects/:id/meta` returns ONLY `{ id, title, requiresPin: true }` — NEVER expose the `.glb` URL in public metadata!
-     - Only after the client submits the correct PIN to `POST /api/projects/:id/verify-pin` does the backend return `{ verified: true, modelUrl: "/uploads/...", projectData }`.
 
-     
+1. **Production Server Invariants (`server.ts`):**
+   - **Production Static Serving:** When `NODE_ENV === "production"`, serve `dist/assets` with `Cache-Control: public, max-age=31536000, immutable`, serve `dist/` root, and route non-API/non-upload GET requests to `dist/index.html`.
+   - **Health Check:** Provide `GET /api/health` returning `{ status: "ok" }`.
+   - **Security Headers:** Enforce `X-Content-Type-Options: nosniff` and `X-Frame-Options: SAMEORIGIN`.
+   - **Rate Limiting:** Enforce Map-based rate limiter on PIN verification (max 5 failed tries per IP per 5 mins -> HTTP 429) with expired entry pruning.
+   - **Static Upload Caching & Sanitization:** Sanitize filenames via `path.basename()` and extension allowlist (`.glb`, `.gltf`, `.jpg`, `.jpeg`, `.png`, `.webp`, `.mp4`). Cache `/uploads` with `Cache-Control: public, max-age=31536000, immutable`.
+   - **Network Binding:** Bind `0.0.0.0` on `Number(process.env.PORT) || 3000`.
+
+2. **Video-to-GLB Reliability (`src/lib/3d/video-to-glb-builder.ts` & `server.ts`):**
+   - Ensure browser frame extraction samples across the video, scores sharpness using Laplacian variance on a 256px canvas, and selects the 8 sharpest time-bucketed snapshots.
+   - Downscale extracted frames to max `1024px` JPEG (`0.85` quality) before uploading (<2MB total payload).
+   - In `server.ts` (`/api/3d/reconstruct-video`), pass `process.env.HF_TOKEN` (if present) to `@gradio/client` when connecting to `naver/MASt3R` and `facebook/vggt` for 5x higher free ZeroGPU quota.
+
+3. **Backend Security & PIN Access Control (`server.ts` & `src/components/security/`):**
+   - Support Designer PIN setup (`PinSetupModal.tsx`) and management (`DesignerPinSettingsModal.tsx`).
+   - `GET /api/projects/:id/meta` and `/public` return ONLY `{ id, title, requiresPin: true }`—NEVER expose the `.glb` URL in public metadata!
+   - `POST /api/projects/:id/verify-pin` unlocks `{ verified: true, modelUrl, title }` strictly after successful PIN validation.
