@@ -16,8 +16,15 @@ import {
   ChevronRight,
   ChevronLeft,
   Eye,
-  Maximize2
+  Maximize2,
+  ShieldCheck,
+  KeyRound
 } from 'lucide-react';
+import {
+  ClientPinGate,
+  PinSetupModal,
+  DesignerPinSettingsModal
+} from '../components/security';
 import StreetViewViewer, {
   type SpatialPinItem,
   type FunnelStage,
@@ -44,6 +51,8 @@ export default function SpatialWorkspacePage() {
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
 
   const [isSignOffOpen, setIsSignOffOpen] = useState<boolean>(false);
+  const [isPinSetupOpen, setIsPinSetupOpen] = useState<boolean>(false);
+  const [isDesignerSettingsOpen, setIsDesignerSettingsOpen] = useState<boolean>(false);
   const [isDraggingFile, setIsDraggingFile] = useState<boolean>(false);
   const [isReconstructing, setIsReconstructing] = useState<boolean>(false);
   const [reconstructionStatus, setReconstructionStatus] = useState<{ stage: string; percent: number } | null>(null);
@@ -246,8 +255,14 @@ export default function SpatialWorkspacePage() {
   };
 
   return (
-    <div
-      className="relative w-screen h-screen overflow-hidden bg-[#070605] text-stone-100 font-sans select-none"
+    <ClientPinGate
+      onModelUnlocked={(unlockedUrl, title) => {
+        setModelUrl(unlockedUrl);
+        if (title) setModelFileName(title);
+      }}
+    >
+      <div
+        className="relative w-screen h-screen overflow-hidden bg-[#070605] text-stone-100 font-sans select-none"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -323,8 +338,18 @@ export default function SpatialWorkspacePage() {
                 ATELIER VIEW
               </span>
             </div>
-            <div className="px-3.5 py-1 rounded-full border border-white/10 bg-white/[0.03] backdrop-blur-md text-[10px] font-mono uppercase tracking-[0.2em] text-[#D4B483]/80">
-              4-STAGE ARCHITECTURAL PORTAL
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsDesignerSettingsOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border border-[#D4B483]/30 bg-[#14120e]/80 hover:bg-[#1a1712] hover:border-[#D4B483]/60 backdrop-blur-md text-[11px] font-mono tracking-wider text-[#D4B483] transition-all cursor-pointer shadow-[0_0_15px_rgba(212,180,131,0.12)]"
+                title="View all saved models, access codes, and links"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-[#E5C158]" />
+                My Models &amp; PINs
+              </button>
+              <div className="px-3.5 py-1 rounded-full border border-white/10 bg-white/[0.03] backdrop-blur-md text-[10px] font-mono uppercase tracking-[0.2em] text-[#D4B483]/80">
+                4-STAGE ARCHITECTURAL PORTAL
+              </div>
             </div>
           </header>
 
@@ -406,6 +431,22 @@ export default function SpatialWorkspacePage() {
                   Back to Floorplan
                 </button>
               )}
+              <button
+                onClick={() => setIsPinSetupOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#14120e]/95 backdrop-blur-xl border border-[#D4B483]/50 hover:border-[#D4B483] text-xs text-[#D4B483] hover:text-[#E5C158] transition-all font-mono cursor-pointer shadow-[0_0_20px_rgba(212,180,131,0.18)]"
+                title="Protect this 3D model with a PIN and create client share link"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-[#E5C158]" />
+                Share &amp; Set PIN
+              </button>
+              <button
+                onClick={() => setIsDesignerSettingsOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 hover:border-[#D4B483]/40 text-xs text-zinc-300 hover:text-white transition-all font-mono cursor-pointer"
+                title="View all saved models, access codes, and links"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-[#D4B483]" />
+                My Models &amp; PINs
+              </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 hover:border-white/25 text-xs text-zinc-300 hover:text-white transition-all font-mono cursor-pointer"
@@ -842,6 +883,22 @@ export default function SpatialWorkspacePage() {
           </div>
         </div>
       )}
+
+      {/* Security & Access Code Modals */}
+      <PinSetupModal
+        isOpen={isPinSetupOpen}
+        onClose={() => setIsPinSetupOpen(false)}
+        modelUrl={modelUrl}
+        defaultTitle={modelFileName || 'Architectural Space'}
+      />
+      <DesignerPinSettingsModal
+        isOpen={isDesignerSettingsOpen}
+        onClose={() => setIsDesignerSettingsOpen(false)}
+        onSelectModel={(url, title) => {
+          loadFileFromBlob(url, title || 'saved_model.glb');
+        }}
+      />
     </div>
-  );
+  </ClientPinGate>
+);
 }
