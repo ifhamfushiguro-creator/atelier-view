@@ -23,7 +23,6 @@ export const ClientPinGate: React.FC<ClientPinGateProps> = ({
   const [unlockedModelUrl, setUnlockedModelUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    // 1. Detect project parameter from URL or prop
     let id = explicitProjectId;
     if (!id && typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -31,22 +30,18 @@ export const ClientPinGate: React.FC<ClientPinGateProps> = ({
     }
 
     if (!id) {
-      // Normal designer mode (no project parameter in URL)
       setActiveProjectId(null);
       setIsUnlocked(true);
       return;
     }
 
     setActiveProjectId(id);
-
-    // 2. Fetch public project metadata (never returns modelUrl or pinCode!)
     setIsLoadingMeta(true);
     setMetaError(null);
 
     getPublicProjectMeta(id)
       .then((meta) => {
         setProjectTitle(meta.title);
-        // If project does not require a PIN, it might be open
         if (!meta.requiresPin) {
           setIsUnlocked(true);
         }

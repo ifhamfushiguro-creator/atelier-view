@@ -48,6 +48,16 @@ export function saveProjectsDatabase(data: Record<string, StoredProject>): void 
   }
 }
 
+const ALLOWED_UPLOAD_EXTS = new Set(['.glb', '.gltf', '.jpg', '.jpeg', '.png', '.webp', '.mp4']);
+
+export function sanitizeFileName(name: string, fallback = 'file'): string {
+  const base = path.basename(name || fallback);
+  const ext = path.extname(base).toLowerCase();
+  const safeExt = ALLOWED_UPLOAD_EXTS.has(ext) ? ext : '.glb';
+  const cleanBase = base.slice(0, base.length - ext.length).replace(/[^a-zA-Z0-9_-]/g, '_') || fallback;
+  return `${cleanBase}${safeExt}`;
+}
+
 export async function reconstructVideoFrames(
   framesBase64: string[],
   fileName: string = 'video_room'
@@ -65,7 +75,8 @@ export async function reconstructVideoFrames(
     const res = await fetch(remoteUrl);
     if (!res.ok) throw new Error(`Failed to download reconstructed GLB: ${res.statusText}`);
     const buf = Buffer.from(await res.arrayBuffer());
-    const baseClean = fileName.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeName = sanitizeFileName(fileName, 'video_room');
+    const baseClean = safeName.replace(/\.[^.]+$/, '');
     const outName = `reconstructed_${prefix}_${Date.now()}_${baseClean}.glb`;
     fs.writeFileSync(path.join(uploadsDir, outName), buf);
     pruneUploads(uploadsDir);
@@ -170,8 +181,39 @@ function pruneUploads(dir: string, maxFiles = 20, maxAgeMs = 24 * 3600 * 1000): 
 }
 
 const app = express();
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  next();
+});
 app.use(express.json({ limit: '50mb' }));
+app.use('/uploads', express.static(path.resolve(process.cwd(), 'public', 'uploads'), {
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  },
+}));
 app.use(express.static('public'));
+
+export const pinFailures = new Map<string, { count: number; resetAt: number }>();
+
+function isPinRateLimited(ip: string): boolean {
+  const now = Date.now();
+  for (const [key, val] of pinFailures) {
+    if (now > val.resetAt) pinFailures.delete(key);
+  }
+  const entry = pinFailures.get(ip);
+  return Boolean(entry && entry.count >= 5 && now < entry.resetAt);
+}
+
+function recordPinFailure(ip: string): void {
+  const now = Date.now();
+  const entry = pinFailures.get(ip);
+  if (!entry || now > entry.resetAt) {
+    pinFailures.set(ip, { count: 1, resetAt: now + 5 * 60 * 1000 });
+  } else {
+    entry.count += 1;
+  }
+}
 
 app.post('/api/3d/reconstruct-video', async (req, res) => {
   try {
@@ -179,7 +221,8 @@ app.post('/api/3d/reconstruct-video', async (req, res) => {
     if (!framesBase64 || !Array.isArray(framesBase64) || framesBase64.length === 0) {
       return res.status(400).json({ error: 'No frames provided' });
     }
-    const result = await reconstructVideoFrames(framesBase64, fileName || 'walkthrough');
+    const safeName = sanitizeFileName(fileName || 'walkthrough');
+    const result = await reconstructVideoFrames(framesBase64, safeName);
     return res.json(result);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Reconstruction failed';
@@ -298,6 +341,11 @@ app.get('/api/projects/:projectId/meta', handleGetPublicProject);
 // 4. Verify PIN endpoint - returns modelUrl only upon correct PIN
 app.post('/api/projects/:projectId/verify-pin', (req, res) => {
   try {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
+    if (isPinRateLimited(ip)) {
+      return res.status(429).json({ verified: false, error: 'Too many failed attempts. Try again in 5 minutes.' });
+    }
+
     const projectId = String(req.params.projectId);
     const { pinCode } = req.body || {};
 
@@ -312,6 +360,7 @@ app.post('/api/projects/:projectId/verify-pin', (req, res) => {
     const storedPin = String(project.pinCode || '').trim();
 
     if (!storedPin || cleanInputPin === storedPin) {
+      pinFailures.delete(ip);
       return res.json({
         verified: true,
         modelUrl: project.modelUrl,
@@ -319,6 +368,7 @@ app.post('/api/projects/:projectId/verify-pin', (req, res) => {
       });
     }
 
+    recordPinFailure(ip);
     return res.status(401).json({
       verified: false,
       error: 'Invalid access code',

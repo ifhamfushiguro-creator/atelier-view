@@ -11,7 +11,6 @@ import {
   Save,
   Eye,
   EyeOff,
-  Sparkles,
   FolderOpen,
   Shield,
   Layers,

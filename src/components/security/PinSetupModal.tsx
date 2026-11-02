@@ -6,9 +6,7 @@ import {
   Copy,
   Check,
   ShieldCheck,
-  Share2,
   ExternalLink,
-  RefreshCw,
   Eye,
   EyeOff,
 } from 'lucide-react';

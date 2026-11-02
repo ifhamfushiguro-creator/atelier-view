@@ -6,6 +6,8 @@ import app, {
   loadProjectsDatabase,
   saveProjectsDatabase,
   PROJECTS_DB_PATH,
+  pinFailures,
+  sanitizeFileName,
 } from '../../../server';
 
 // Lightweight in-memory request simulation helper for express app
@@ -181,5 +183,42 @@ test('PIN Security: Full Project Lifecycle and Access Control', async (t) => {
 
     assert.equal(res.status, 403);
     assert.match(res.body.error, /Unauthorized/);
+  });
+
+  await t.test('8. Rate limiter blocks verification after 5 failed attempts (429)', async () => {
+    const rateLimitIp = '198.51.100.42';
+    const hdrs = { 'x-forwarded-for': rateLimitIp };
+
+    for (let i = 0; i < 5; i++) {
+      const res = await makeRequest(
+        'POST',
+        `/api/projects/${savedProjectId}/verify-pin`,
+        { pinCode: '0000' },
+        hdrs
+      );
+      assert.equal(res.status, 401);
+    }
+
+    const blockedRes = await makeRequest(
+      'POST',
+      `/api/projects/${savedProjectId}/verify-pin`,
+      { pinCode: '8492' },
+      hdrs
+    );
+    assert.equal(blockedRes.status, 429);
+    assert.match(blockedRes.body.error, /Too many failed attempts/);
+    pinFailures.delete(rateLimitIp);
+  });
+
+  await t.test('9. Sanitizes uploaded filenames and enforces extension allowlist', () => {
+    assert.equal(sanitizeFileName('../../../passwd.exe'), 'passwd.glb');
+    assert.equal(sanitizeFileName('C:\\Windows\\system32\\video.mp4'), 'video.mp4');
+    assert.equal(sanitizeFileName('luxury suite penthouse!.glb'), 'luxury_suite_penthouse_.glb');
+  });
+
+  await t.test('10. Sets security headers on responses', async () => {
+    const res = await makeRequest('GET', '/api/projects/my-projects');
+    assert.equal(res.headers['x-content-type-options'], 'nosniff');
+    assert.equal(res.headers['x-frame-options'], 'SAMEORIGIN');
   });
 });

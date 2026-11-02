@@ -2,7 +2,6 @@ import React, { useState, useMemo, useRef, useCallback } from 'react';
 import {
   Upload,
   Video,
-  Box,
   Sparkles,
   CheckCircle2,
   Clock,
