@@ -251,11 +251,16 @@ export const PinSetupModal: React.FC<PinSetupModalProps> = ({
                 className="px-6 py-2.5 bg-gradient-to-r from-[#D4B483] to-[#E5C158] hover:from-[#dfc091] hover:to-[#ebcf6c] disabled:opacity-40 disabled:cursor-not-allowed text-[#070605] font-semibold text-xs uppercase tracking-[0.16em] rounded-xl flex items-center gap-2 shadow-[0_10px_25px_rgba(212,180,131,0.25)] transition-all cursor-pointer"
               >
                 {isSaving ? (
-                  <div className="w-3.5 h-3.5 border-2 border-[#070605] border-t-transparent rounded-full animate-spin" />
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-[#070605] border-t-transparent rounded-full animate-spin" />
+                    <span>Persisting 3D Model...</span>
+                  </>
                 ) : (
-                  <ShieldCheck className="w-4 h-4 text-[#070605]" />
+                  <>
+                    <ShieldCheck className="w-4 h-4 text-[#070605]" />
+                    <span>Save &amp; Generate Link</span>
+                  </>
                 )}
-                Save &amp; Generate Link
               </button>
             </div>
           </form>

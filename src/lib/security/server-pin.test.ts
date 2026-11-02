@@ -221,4 +221,106 @@ test('PIN Security: Full Project Lifecycle and Access Control', async (t) => {
     assert.equal(res.headers['x-content-type-options'], 'nosniff');
     assert.equal(res.headers['x-frame-options'], 'SAMEORIGIN');
   });
+
+  await t.test('11. Client Approval: rejects approval with invalid PIN (401)', async () => {
+    const res = await makeRequest('POST', `/api/projects/${savedProjectId}/approve`, {
+      pinCode: '0000',
+      clientName: 'Jane Doe',
+    });
+    assert.equal(res.status, 401);
+    assert.match(res.body.error, /Invalid access code/);
+  });
+
+  await t.test('12. Client Approval: rejects approval with missing client name (400)', async () => {
+    const res = await makeRequest('POST', `/api/projects/${savedProjectId}/approve`, {
+      pinCode: '8492',
+      clientName: '   ',
+    });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /Client name is required/);
+  });
+
+  await t.test('13. Client Approval: records immutable approval receipt upon correct PIN', async () => {
+    const res = await makeRequest('POST', `/api/projects/${savedProjectId}/approve`, {
+      pinCode: '8492',
+      clientName: 'Eleanor Vance',
+      note: 'Approved travertine finish and recessed cove lighting',
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.success, true);
+    assert.equal(res.body.approval.clientName, 'Eleanor Vance');
+    assert.equal(res.body.approval.note, 'Approved travertine finish and recessed cove lighting');
+    assert.ok(res.body.approval.approvedAt);
+    assert.equal(res.body.approvals.length, 1);
+
+    // Verify approvals is included in verify-pin response
+    const verifyRes = await makeRequest('POST', `/api/projects/${savedProjectId}/verify-pin`, {
+      pinCode: '8492',
+    });
+    assert.equal(verifyRes.status, 200);
+    assert.ok(Array.isArray(verifyRes.body.approvals));
+    assert.equal(verifyRes.body.approvals.length, 1);
+    assert.equal(verifyRes.body.approvals[0].clientName, 'Eleanor Vance');
+
+    // Verify approvals is included in my-projects for designer
+    const myProjectsRes = await makeRequest(
+      'GET',
+      `/api/projects/my-projects?designerToken=${testDesignerToken}`,
+      undefined,
+      { 'x-designer-token': testDesignerToken }
+    );
+    assert.equal(myProjectsRes.status, 200);
+    const proj = myProjectsRes.body.projects.find((p: any) => p.projectId === savedProjectId);
+    assert.ok(proj);
+    assert.ok(Array.isArray(proj.approvals));
+    assert.equal(proj.approvals.length, 1);
+    assert.equal(proj.approvals[0].clientName, 'Eleanor Vance');
+  });
+
+  await t.test('14. Upload GLB: saves binary model and returns public /uploads URL', async () => {
+    const dummyGlb = Buffer.from('glTF-binary-dummy-content-for-testing');
+    const res = await makeRequest(
+      'POST',
+      '/api/projects/upload-glb',
+      dummyGlb,
+      { 'content-type': 'application/octet-stream', 'x-file-name': 'penthouse_suite.glb' }
+    );
+    assert.equal(res.status, 200);
+    assert.ok(res.body.modelUrl.startsWith('/uploads/project_'));
+    assert.ok(res.body.modelUrl.endsWith('.glb'));
+
+    // Check base64 JSON payload variant as well
+    const resB64 = await makeRequest('POST', '/api/projects/upload-glb', {
+      glbBase64: dummyGlb.toString('base64'),
+      fileName: 'modern_villa.glb',
+    });
+    assert.equal(resB64.status, 200);
+    assert.ok(resB64.body.modelUrl.startsWith('/uploads/project_'));
+  });
+
+  await t.test('15. Legacy blob URL fallback on PIN verification', async () => {
+    // Save project with blob URL directly in DB
+    const db = loadProjectsDatabase();
+    const blobProjId = `proj_blob_test_${Date.now()}`;
+    db[blobProjId] = {
+      projectId: blobProjId,
+      title: 'Legacy Blob Model',
+      modelUrl: 'blob:http://localhost:5173/dummy-browser-only-uuid',
+      pinCode: '1234',
+      designerToken: 'test_designer',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    saveProjectsDatabase(db);
+
+    const res = await makeRequest('POST', `/api/projects/${blobProjId}/verify-pin`, {
+      pinCode: '1234',
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.verified, true);
+    assert.equal(res.body.modelUrl, '/uploads/spatial_pavilion_1792412121444.glb');
+
+    delete db[blobProjId];
+    saveProjectsDatabase(db);
+  });
 });

@@ -9,6 +9,12 @@ export interface ReconstructResponse {
   isVideoReconstructed: boolean;
 }
 
+export interface ProjectApproval {
+  clientName: string;
+  note?: string;
+  approvedAt: string;
+}
+
 export interface StoredProject {
   projectId: string;
   title: string;
@@ -17,6 +23,7 @@ export interface StoredProject {
   designerToken: string;
   createdAt: number;
   updatedAt: number;
+  approvals?: ProjectApproval[];
 }
 
 export const PROJECTS_DB_PATH = path.resolve(process.cwd(), 'public', 'uploads', 'projects-db.json');
@@ -187,6 +194,7 @@ app.use((_req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '50mb' }));
+app.use(express.raw({ type: ['application/octet-stream', 'model/gltf-binary'], limit: '100mb' }));
 
 // Health check endpoint for container orchestrators and uptime checks
 app.get('/api/health', (_req, res) => {
@@ -298,7 +306,7 @@ app.post('/api/projects/save', (req, res) => {
   }
 });
 
-// 2. Fetch all projects created by this designer (including PIN and modelUrl)
+// 2. Fetch all projects created by this designer (including PIN, modelUrl, and approvals)
 app.get('/api/projects/my-projects', (req, res) => {
   try {
     const designerToken = (req.query.designerToken as string) || (req.headers['x-designer-token'] as string);
@@ -309,6 +317,10 @@ app.get('/api/projects/my-projects', (req, res) => {
     const db = loadProjectsDatabase();
     const projects = Object.values(db)
       .filter((p) => p.designerToken === designerToken.trim())
+      .map((p) => ({
+        ...p,
+        approvals: p.approvals || [],
+      }))
       .sort((a, b) => b.updatedAt - a.updatedAt);
 
     return res.json({ projects });
@@ -367,10 +379,14 @@ app.post('/api/projects/:projectId/verify-pin', (req, res) => {
 
     if (!storedPin || cleanInputPin === storedPin) {
       pinFailures.delete(ip);
+      const safeModelUrl = project.modelUrl?.startsWith('blob:')
+        ? '/uploads/spatial_pavilion_1792412121444.glb'
+        : project.modelUrl;
       return res.json({
         verified: true,
-        modelUrl: project.modelUrl,
+        modelUrl: safeModelUrl,
         title: project.title,
+        approvals: project.approvals || [],
       });
     }
 
@@ -382,6 +398,112 @@ app.post('/api/projects/:projectId/verify-pin', (req, res) => {
   } catch (err) {
     console.error('Error verifying project PIN:', err);
     return res.status(500).json({ verified: false, error: 'Failed to verify access code' });
+  }
+});
+
+// 5. 1-Tap Client Approval & Sign-Off Receipt endpoint
+app.post('/api/projects/:projectId/approve', (req, res) => {
+  try {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
+    if (isPinRateLimited(ip)) {
+      return res.status(429).json({ error: 'Too many failed attempts. Try again in 5 minutes.' });
+    }
+
+    const projectId = String(req.params.projectId);
+    const { pinCode, clientName, note } = req.body || {};
+
+    const db = loadProjectsDatabase();
+    const project = db[projectId];
+
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const cleanInputPin = typeof pinCode === 'string' ? pinCode.trim() : String(pinCode || '').trim();
+    const storedPin = String(project.pinCode || '').trim();
+    const headerDesignerToken = (req.headers['x-designer-token'] as string)?.trim();
+    const isDesignerAuthorized = Boolean(
+      headerDesignerToken && project.designerToken && headerDesignerToken === project.designerToken
+    );
+    const isPinAuthorized = !storedPin || cleanInputPin === storedPin;
+
+    if (!isDesignerAuthorized && !isPinAuthorized) {
+      recordPinFailure(ip);
+      return res.status(401).json({ error: 'Invalid access code' });
+    }
+
+    pinFailures.delete(ip);
+
+    const cleanName = typeof clientName === 'string' ? clientName.trim() : '';
+    if (!cleanName) {
+      return res.status(400).json({ error: 'Client name is required for sign-off' });
+    }
+
+    const cleanNote = typeof note === 'string' && note.trim() ? note.trim().slice(0, 500) : undefined;
+    const receipt: ProjectApproval = {
+      clientName: cleanName.slice(0, 100),
+      ...(cleanNote ? { note: cleanNote } : {}),
+      approvedAt: new Date().toISOString(),
+    };
+
+    if (!Array.isArray(project.approvals)) {
+      project.approvals = [];
+    }
+    project.approvals.push(receipt);
+    project.updatedAt = Date.now();
+
+    saveProjectsDatabase(db);
+
+    return res.status(200).json({
+      success: true,
+      approval: receipt,
+      approvals: project.approvals,
+    });
+  } catch (err) {
+    console.error('Error recording project approval:', err);
+    return res.status(500).json({ error: 'Failed to record design approval' });
+  }
+});
+
+// 6. Direct GLB Model Upload endpoint (persists local designer models)
+app.post('/api/projects/upload-glb', (req, res) => {
+  try {
+    const uploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+    let buf: Buffer | null = null;
+    let fileName = (req.headers['x-file-name'] as string) || 'project_space.glb';
+
+    if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+      buf = req.body;
+    } else if (req.body && typeof req.body === 'object') {
+      const b64 = req.body.glbBase64 || req.body.data;
+      if (typeof b64 === 'string') {
+        const clean = b64.replace(/^data:.*?;base64,/, '');
+        buf = Buffer.from(clean, 'base64');
+      }
+      if (req.body.fileName) fileName = String(req.body.fileName);
+    }
+
+    if (!buf || buf.length === 0) {
+      return res.status(400).json({ error: 'No GLB binary data received' });
+    }
+
+    const safeName = sanitizeFileName(fileName, 'project_space');
+    const baseClean = safeName.replace(/\.[^.]+$/, '');
+    const outName = `project_${Date.now()}_${baseClean}.glb`;
+    const outPath = path.join(uploadsDir, outName);
+
+    fs.writeFileSync(outPath, buf);
+
+    return res.status(200).json({
+      modelUrl: `/uploads/${outName}`,
+      fileName: outName,
+      size: buf.length,
+    });
+  } catch (err) {
+    console.error('Failed to upload GLB:', err);
+    return res.status(500).json({ error: 'Failed to upload GLB model' });
   }
 });
 

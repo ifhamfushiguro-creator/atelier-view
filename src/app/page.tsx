@@ -256,8 +256,11 @@ export default function SpatialWorkspacePage() {
   return (
     <ClientPinGate
       onModelUnlocked={(unlockedUrl, title) => {
-        setModelUrl(unlockedUrl);
+        loadFileFromBlob(unlockedUrl, title || 'unlocked_space.glb');
         if (title) setModelFileName(title);
+      }}
+      onUnlock={(unlockedUrl, title) => {
+        loadFileFromBlob(unlockedUrl, title || 'unlocked_space.glb');
       }}
     >
       <div
