@@ -1,10 +1,16 @@
 node_modules
 dist
 .env
+.env.*
+!.env.example
 .DS_Store
 *.log
 .playwright
 test-results
+playwright-report
 blob-report
+.aistudio/
 
-
+# Public uploads user data (keep directory structure with .gitkeep)
+public/uploads/*
+!public/uploads/.gitkeep

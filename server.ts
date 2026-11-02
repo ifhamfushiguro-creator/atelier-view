@@ -187,6 +187,12 @@ app.use((_req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '50mb' }));
+
+// Health check endpoint for container orchestrators and uptime checks
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok' });
+});
+
 app.use('/uploads', express.static(path.resolve(process.cwd(), 'public', 'uploads'), {
   setHeaders: (res) => {
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
@@ -379,14 +385,37 @@ app.post('/api/projects/:projectId/verify-pin', (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3001;
+// Production SPA static delivery
+const isProd = process.env.NODE_ENV === 'production';
+const distPath = path.resolve(process.cwd(), 'dist');
+const distIndexPath = path.join(distPath, 'index.html');
+
+if (isProd && fs.existsSync(distIndexPath)) {
+  app.use(
+    '/assets',
+    express.static(path.join(distPath, 'assets'), {
+      setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      },
+    })
+  );
+  app.use(express.static(distPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+      return next();
+    }
+    return res.sendFile(distIndexPath);
+  });
+}
+
+const PORT = Number(process.env.PORT) || 3000;
 const isDirectRun =
   typeof process.argv[1] === 'string' &&
   /(?:^|[\\/])server\.(?:ts|js)$/.test(process.argv[1]);
 
 if (isDirectRun && process.env.NODE_ENV !== 'test') {
-  app.listen(PORT, () => {
-    console.log(`Atelier View server listening on http://localhost:${PORT}`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Atelier View server listening on http://0.0.0.0:${PORT}`);
   });
 }
 
