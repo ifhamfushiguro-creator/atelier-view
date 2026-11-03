@@ -11,6 +11,7 @@ export interface WalkStepBounds {
   center?: [number, number, number];
   radius?: number;
   lockFloorY?: boolean;
+  storyClearHeight?: number;
 }
 
 /**
@@ -79,8 +80,9 @@ export function calculateWalkStep(
   }
 
   // 2. Step-up / step-down stair climbing & foot height raycast
-  raycaster.set(new THREE.Vector3(nextX, currentFootY + 1.15, nextZ), new THREE.Vector3(0, -1, 0));
-  raycaster.far = 2.4;
+  const probeY = currentFootY + (bounds?.storyClearHeight ? bounds.storyClearHeight * 0.6 : 1.15);
+  raycaster.set(new THREE.Vector3(nextX, probeY, nextZ), new THREE.Vector3(0, -1, 0));
+  raycaster.far = probeY - currentFootY + 1.35;
   const downHits = raycaster.intersectObjects(meshes, false);
 
   let validStepY = bounds?.lockFloorY && bounds.center ? bounds.center[1] : currentFootY;

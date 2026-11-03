@@ -10,7 +10,7 @@ export interface Waypoint {
 
 export interface FloorSlice {
   id: string; floorNumber: number; label: string; subtitle: string;
-  minY: number; floorY: number; maxY: number; cutY: number; rooms: Waypoint[];
+  minY: number; floorY: number; maxY: number; cutY: number; bottomCutY?: number; rooms: Waypoint[];
 }
 
 export interface SpatialPinItem {
@@ -101,21 +101,29 @@ export function applyVisualPolish(
           map: activeMap,
           color: origMat.color ? origMat.color.clone() : new THREE.Color(0xffffff),
           vertexColors: hasVertexColors, side: THREE.DoubleSide,
-          transparent: Boolean(origMat.transparent), opacity: origMat.opacity ?? 1
+          transparent: Boolean(origMat.transparent), opacity: origMat.opacity ?? 1,
+          polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
         });
       } else if (hasVertexColors) {
         // MASt3R triangulated mesh vertex colors: MeshBasicMaterial for vivid photorealism
-        mesh.material = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+        mesh.material = new THREE.MeshBasicMaterial({
+          vertexColors: true, side: THREE.DoubleSide,
+          polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
+        });
       } else {
         mesh.material = new THREE.MeshStandardMaterial({
           color: origMat.color ? origMat.color.clone() : new THREE.Color(0xd4d4d8),
           emissive: origMat.emissive ? origMat.emissive.clone() : new THREE.Color(0x000000),
-          roughness: origMat.roughness ?? 0.7, metalness: origMat.metalness ?? 0.1, side: THREE.DoubleSide
+          roughness: origMat.roughness ?? 0.7, metalness: origMat.metalness ?? 0.1, side: THREE.DoubleSide,
+          polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
         });
       }
     } else if (mode === 'white-clay') {
       if (wireChild) wireChild.visible = false;
-      mesh.material = new THREE.MeshStandardMaterial({ color: '#D6D3CD', roughness: 0.88, metalness: 0.05, side: THREE.DoubleSide });
+      mesh.material = new THREE.MeshStandardMaterial({
+        color: '#D6D3CD', roughness: 0.88, metalness: 0.05, side: THREE.DoubleSide,
+        polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
+      });
     } else if (mode === 'cyber-blueprint') {
       mesh.material = new THREE.MeshStandardMaterial({
         color: '#0D131A', roughness: 0.8, metalness: 0.1, side: THREE.DoubleSide,

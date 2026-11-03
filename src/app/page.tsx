@@ -256,16 +256,26 @@ export default function SpatialWorkspacePage() {
   return (
     <ClientPinGate
       onModelUnlocked={(unlockedUrl, title) => {
-        setModelUrl(unlockedUrl);
+        loadFileFromBlob(unlockedUrl, title || 'unlocked_space.glb');
         if (title) setModelFileName(title);
+      }}
+      onUnlock={(unlockedUrl, title) => {
+        loadFileFromBlob(unlockedUrl, title || 'unlocked_space.glb');
       }}
     >
       <div
-        className="relative w-screen h-screen overflow-hidden bg-[#070605] text-stone-100 font-sans select-none"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-    >
+        className="relative w-screen h-screen overflow-hidden text-stone-100 font-sans select-none"
+        style={{
+          background: isModelLoaded
+            ? '#070605'
+            : `conic-gradient(from 162deg at 50% -8%, transparent 0deg, rgba(212, 148, 58, 0.16) 14deg, rgba(255, 204, 112, 0.28) 18deg, rgba(212, 148, 58, 0.16) 22deg, transparent 36deg),
+               radial-gradient(ellipse 42% 52% at 50% 48%, rgba(235, 168, 68, 0.24) 0%, rgba(140, 82, 20, 0.09) 48%, transparent 75%),
+               #040302`
+        }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
       <input ref={fileInputRef} type="file" accept=".glb,.gltf" onChange={handleFileChange} className="hidden" />
       <input ref={videoInputRef} type="file" accept=".mp4,.mov,.webm" onChange={handleVideoInputChange} className="hidden" />
 
@@ -352,7 +362,8 @@ export default function SpatialWorkspacePage() {
             </div>
           </header>
 
-          <div className="flex flex-col items-center justify-center text-center -mt-16 pointer-events-none">
+          {/* Title Header Block positioned in upper 11–14% of viewport so it never collides with 3D sculpture cube */}
+          <div className="absolute top-[12%] left-0 right-0 flex flex-col items-center justify-center text-center pointer-events-none px-4">
             <span className="text-[10px] font-mono uppercase tracking-[0.35em] text-amber-400/70 block mb-2">
               PRIVATE SPATIAL VIEWING ROOM
             </span>
@@ -364,7 +375,7 @@ export default function SpatialWorkspacePage() {
             </p>
           </div>
 
-          <div className="w-full flex flex-col items-center gap-3 pb-2 pointer-events-auto">
+          <div className="w-full flex flex-col items-center gap-3 pb-2 pointer-events-auto mt-auto">
             <div className="bg-[#110F0D]/80 backdrop-blur-xl border border-[#D4B483]/25 hover:border-[#D4B483]/60 rounded-full px-6 py-3 shadow-[0_20px_50px_rgba(0,0,0,0.85)] flex items-center gap-4 transition-all">
               <button
                 onClick={() => fileInputRef.current?.click()}
@@ -544,7 +555,7 @@ export default function SpatialWorkspacePage() {
                           key={room.id}
                           onClick={() => {
                             setActiveRoomId(room.id);
-                            setFunnelStage('room-view');
+                            setFunnelStage('room-walk');
                           }}
                           className={`flex items-center justify-between p-3 rounded-xl border text-left transition-all cursor-pointer group ${
                             isSel
@@ -553,8 +564,8 @@ export default function SpatialWorkspacePage() {
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
-                            <span className="w-6 h-6 rounded-lg bg-black/40 border border-white/10 flex items-center justify-center text-[10px] font-mono text-[#D4B483]">
-                              {room.name.slice(0, 2)}
+                            <span className="w-5 h-5 rounded-full bg-[#10B981] border-2 border-white/90 shadow-sm flex items-center justify-center shrink-0">
+                              <span className="w-1.5 h-1.5 rounded-full bg-white" />
                             </span>
                             <span className="text-xs font-medium tracking-wide">
                               {room.name.replace(/^\d+\.\s*/, '')}
@@ -582,17 +593,28 @@ export default function SpatialWorkspacePage() {
               </div>
 
               {/* Bottom Trigger */}
-              <div className="pt-4 border-t border-white/10">
+              <div className="pt-4 border-t border-white/10 flex flex-col gap-2">
+                <button
+                  onClick={() => {
+                    const firstRoom = floorRooms[0] || waypoints[0];
+                    if (firstRoom) setActiveRoomId(firstRoom.id);
+                    setFunnelStage('room-walk');
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
+                >
+                  <Footprints className="w-4 h-4" />
+                  Walk Inside Floor (WASD)
+                </button>
                 <button
                   onClick={() => {
                     const firstRoom = floorRooms[0] || waypoints[0];
                     if (firstRoom) setActiveRoomId(firstRoom.id);
                     setFunnelStage('room-view');
                   }}
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
+                  className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white font-medium text-xs transition-all cursor-pointer border border-white/10"
                 >
-                  <Maximize2 className="w-4 h-4" />
-                  Dive Into First Room View
+                  <Maximize2 className="w-3.5 h-3.5 text-[#D4B483]" />
+                  Curated View
                 </button>
               </div>
             </aside>
@@ -613,7 +635,14 @@ export default function SpatialWorkspacePage() {
               </div>
 
               {/* Center: Room Controller & Walk Toggle */}
-              <div className="pointer-events-auto bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center gap-3 shadow-2xl">
+              <div className="relative pointer-events-auto bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center gap-3 shadow-2xl">
+                {/* Floating Walking Hint */}
+                {funnelStage === 'room-walk' && (
+                  <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-3.5 py-1 rounded-full bg-[#0a0a0a]/95 backdrop-blur-md border border-[#D4B483]/40 text-[10px] font-mono text-[#D4B483] uppercase tracking-wider flex items-center gap-2 pointer-events-none shadow-xl whitespace-nowrap">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    WASD / Arrows to Walk · Mouse Drag to Look
+                  </div>
+                )}
                 {/* Room title & indicator */}
                 <div className="px-3 border-r border-white/10 text-xs font-mono">
                   <span className="text-[10px] text-zinc-500 block uppercase">Curated Volume</span>
