@@ -14,6 +14,8 @@ import {
   FolderOpen,
   Shield,
   Layers,
+  CheckCircle2,
+  Clock,
 } from 'lucide-react';
 import type { ProjectRecord } from '../../types/project';
 import {
@@ -350,6 +352,43 @@ export const DesignerPinSettingsModal: React.FC<DesignerPinSettingsModalProps> =
                       </a>
                     </div>
                   </div>
+
+                  {/* Bottom row: Client Approval Status & Sign-off Receipt */}
+                  {proj.approvals && proj.approvals.length > 0 ? (
+                    <div className="flex flex-col gap-1.5 p-3 rounded-xl bg-emerald-950/25 border border-emerald-500/30">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          <span className="text-xs font-mono text-emerald-300 truncate">
+                            ✅ Approved by <strong className="text-white font-semibold">{proj.approvals[proj.approvals.length - 1].clientName}</strong>
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono text-stone-400 shrink-0">
+                          • {new Date(proj.approvals[proj.approvals.length - 1].approvedAt).toLocaleDateString()} {new Date(proj.approvals[proj.approvals.length - 1].approvedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      {proj.approvals[proj.approvals.length - 1].note && (
+                        <p className="text-xs text-stone-300 italic bg-black/30 px-2.5 py-1.5 rounded-lg border border-white/5 break-words">
+                          "{proj.approvals[proj.approvals.length - 1].note}"
+                        </p>
+                      )}
+                      {proj.approvals.length > 1 && (
+                        <span className="text-[10px] font-mono text-emerald-400/80">
+                          +{proj.approvals.length - 1} prior {proj.approvals.length === 2 ? 'sign-off' : 'sign-offs'}
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-[#080706] border border-white/5 text-xs font-mono">
+                      <div className="flex items-center gap-2 text-stone-400">
+                        <Clock className="w-3.5 h-3.5 text-amber-500/70" />
+                        <span>⏳ Pending Client Approval</span>
+                      </div>
+                      <span className="text-[10px] text-stone-600 uppercase tracking-wider">
+                        Awaiting Sign-off
+                      </span>
+                    </div>
+                  )}
                 </div>
               );
             })
