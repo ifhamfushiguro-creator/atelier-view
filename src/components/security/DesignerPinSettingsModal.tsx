@@ -218,7 +218,7 @@ export const DesignerPinSettingsModal: React.FC<DesignerPinSettingsModalProps> =
               </div>
               <h4 className="text-sm font-medium text-stone-300">No Protected Models Yet</h4>
               <p className="text-xs text-stone-500 max-w-sm">
-                When you load or reconstruct a 3D model, click "Set Access Code" to assign a PIN code and generate a private client link.
+                When you load a 3D model, click "Set Access Code" to assign a PIN code and generate a private client link.
               </p>
             </div>
           ) : (

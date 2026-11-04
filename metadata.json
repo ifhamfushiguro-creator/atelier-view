@@ -1,6 +1,6 @@
 {
   "name": "Spatial — 3D Street View & AI Client Portal",
-  "description": "Ultra-luxury dark-mode 3D Street View walkthrough, video-to-GLB reconstruction engine, and spatial client approval portal for architects and interior designers.",
+  "description": "Ultra-luxury dark-mode 3D Street View walkthrough, and spatial client approval portal for architects and interior designers.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
   Upload,
-  Video,
   Sparkles,
   CheckCircle2,
   Clock,
@@ -30,10 +29,6 @@ import StreetViewViewer, {
   type FloorSlice
 } from '../components/canvas/street-view-viewer';
 import type { VisualPolishMode, Waypoint } from '../lib/3d/simple-normalizer';
-import {
-  buildGlbFromVideo,
-  generateSampleFramesBase64
-} from '../lib/3d/video-to-glb-builder';
 
 export default function SpatialWorkspacePage() {
   const [modelUrl, setModelUrl] = useState<string>('');
@@ -53,11 +48,8 @@ export default function SpatialWorkspacePage() {
   const [isPinSetupOpen, setIsPinSetupOpen] = useState<boolean>(false);
   const [isDesignerSettingsOpen, setIsDesignerSettingsOpen] = useState<boolean>(false);
   const [isDraggingFile, setIsDraggingFile] = useState<boolean>(false);
-  const [isReconstructing, setIsReconstructing] = useState<boolean>(false);
-  const [reconstructionStatus, setReconstructionStatus] = useState<{ stage: string; percent: number } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const videoInputRef = useRef<HTMLInputElement>(null);
   const activeBlobUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -135,50 +127,6 @@ export default function SpatialWorkspacePage() {
     if (file) loadFile(file);
   };
 
-  const handleVideoFile = async (file: File | Blob, name: string) => {
-    try {
-      setIsReconstructing(true);
-      setReconstructionStatus({ stage: 'Reading Video Stream...', percent: 10 });
-      const result = await buildGlbFromVideo(file, (stage, percent) => {
-        setReconstructionStatus({ stage, percent });
-      });
-      loadFileFromBlob(result.glbUrl, result.glbFileName);
-    } catch (err) {
-      console.error('Video reconstruction error:', err);
-      alert('Failed to reconstruct 3D room from video. Please try again or test sample room.');
-    } finally {
-      setIsReconstructing(false);
-      setReconstructionStatus(null);
-    }
-  };
-
-  const handleVideoInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) handleVideoFile(file, file.name);
-  };
-
-  const handleSampleRoomVideo = async () => {
-    try {
-      setIsReconstructing(true);
-      setReconstructionStatus({ stage: 'Synthesizing Multi-View Views...', percent: 25 });
-      const frames = generateSampleFramesBase64(8);
-      setReconstructionStatus({ stage: 'Submitting to ZeroGPU...', percent: 50 });
-      const res = await fetch('/api/3d/reconstruct-video', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ framesBase64: frames, fileName: 'sample_solana_penthouse' })
-      });
-      if (!res.ok) throw new Error('Failed to reconstruct sample');
-      const data = await res.json();
-      loadFileFromBlob(data.modelUrl, 'sample_solana_penthouse_reconstructed.glb');
-    } catch (err) {
-      console.error('Sample room synthesis error:', err);
-    } finally {
-      setIsReconstructing(false);
-      setReconstructionStatus(null);
-    }
-  };
-
   const handleCloseModel = () => {
     if (modelUrl.startsWith('blob:')) {
       const oldUrl = modelUrl;
@@ -212,7 +160,6 @@ export default function SpatialWorkspacePage() {
     if (!file) return;
     const name = file.name.toLowerCase();
     if (name.endsWith('.glb') || name.endsWith('.gltf')) loadFile(file);
-    else if (name.endsWith('.mp4') || name.endsWith('.mov') || name.endsWith('.webm')) handleVideoFile(file, file.name);
   };
 
   const handleAddPin = useCallback((position: [number, number, number]) => {
@@ -286,7 +233,6 @@ export default function SpatialWorkspacePage() {
         onDrop={handleDrop}
       >
       <input ref={fileInputRef} type="file" accept=".glb,.gltf" onChange={handleFileChange} className="hidden" />
-      <input ref={videoInputRef} type="file" accept=".mp4,.mov,.webm" onChange={handleVideoInputChange} className="hidden" />
 
       {/* 3D WebGL Canvas */}
       <div className="absolute inset-0 z-0">
@@ -322,26 +268,7 @@ export default function SpatialWorkspacePage() {
         <div className="absolute inset-0 pointer-events-none z-50 bg-[#070605]/80 backdrop-blur-md border-2 border-[#D4B483] shadow-[0_0_60px_rgba(212,180,131,0.25)_inset] m-6 rounded-3xl flex flex-col items-center justify-center gap-3">
           <Upload className="w-12 h-12 text-[#D4B483] animate-bounce" />
           <span className="text-sm font-light uppercase tracking-[0.25em] text-[#F5EFE6] font-mono">
-            Release .GLB or .MP4 to Load Space
-          </span>
-        </div>
-      )}
-
-      {/* Video-to-3D Reconstruction Progress Overlay */}
-      {isReconstructing && (
-        <div className="fixed inset-0 z-50 bg-[#070605]/85 backdrop-blur-md flex flex-col items-center justify-center p-6 select-none">
-          <div className="w-14 h-14 rounded-full border-2 border-[#D4B483]/20 border-t-[#D4B483] animate-spin mb-5 shadow-[0_0_20px_rgba(212,180,131,0.2)]" />
-          <span className="text-xs font-mono uppercase tracking-[0.25em] text-[#F5EFE6] mb-1">
-            Phase 2: Video-to-3D Reconstruction ($0)
-          </span>
-          <span className="text-sm font-light tracking-wide text-[#D4B483]">
-            {reconstructionStatus?.stage || 'Processing...'}
-          </span>
-          <div className="w-64 h-1 bg-white/10 rounded-full mt-4 overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-amber-400 to-[#D4B483] transition-all duration-300" style={{ width: `${reconstructionStatus?.percent || 0}%` }} />
-          </div>
-          <span className="text-[10px] font-mono text-zinc-400 mt-2">
-            {reconstructionStatus?.percent || 0}% · Real Depth Mesh Synthesis
+            Release .GLB to Load Space
           </span>
         </div>
       )}
@@ -380,7 +307,7 @@ export default function SpatialWorkspacePage() {
               3D PLAYGROUND READY
             </h1>
             <p className="text-xs tracking-[0.20em] uppercase text-[#D4B483]/80 mt-2.5 font-mono drop-shadow-md">
-              DROP A .GLB OR .MP4 VIDEO HERE TO BEGIN
+              DROP A .GLB MODEL HERE TO BEGIN
             </p>
           </div>
 
@@ -391,27 +318,11 @@ export default function SpatialWorkspacePage() {
                 className="flex items-center gap-2 text-xs font-medium tracking-[0.16em] uppercase text-[#F5EFE6] hover:text-[#D4B483] transition-colors cursor-pointer"
               >
                 <FolderOpen className="w-4 h-4 text-[#D4B483]" />
-                Select .GLB
-              </button>
-              <div className="w-[1px] h-3.5 bg-white/15" />
-              <button
-                onClick={() => videoInputRef.current?.click()}
-                className="flex items-center gap-2 text-xs font-medium tracking-[0.16em] uppercase text-[#F5EFE6] hover:text-[#D4B483] transition-colors cursor-pointer"
-              >
-                <Video className="w-4 h-4 text-amber-400" />
-                Upload .MP4 ($0)
-              </button>
-              <div className="w-[1px] h-3.5 bg-white/15" />
-              <button
-                onClick={handleSampleRoomVideo}
-                className="flex items-center gap-1.5 text-xs font-medium tracking-[0.16em] uppercase text-[#D4B483] hover:text-amber-200 transition-colors cursor-pointer"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                Test Sample Room ($0)
+                Select .GLB Model
               </button>
             </div>
             <span className="text-[10px] font-mono tracking-widest text-[#D4B483]/60 uppercase">
-              Drag &amp; drop any .glb model or .mp4 video anywhere on canvas
+              Drag &amp; drop any .glb model anywhere on canvas
             </span>
           </div>
         </div>
@@ -472,13 +383,6 @@ export default function SpatialWorkspacePage() {
               >
                 <FolderOpen className="w-3.5 h-3.5 text-[#D4B483]" />
                 Change .GLB
-              </button>
-              <button
-                onClick={() => videoInputRef.current?.click()}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 hover:border-white/25 text-xs text-zinc-300 hover:text-white transition-all font-mono cursor-pointer"
-              >
-                <Video className="w-3.5 h-3.5 text-amber-400" />
-                Video (.MP4)
               </button>
               <button
                 onClick={handleCloseModel}

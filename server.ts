@@ -1,14 +1,36 @@
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
-import {
-  reconstructVideoFrames,
-  sanitizeFileName,
-  pruneUploads,
-  type ReconstructResponse
-} from './src/lib/3d/video-reconstruction-service.ts';
+const ALLOWED_UPLOAD_EXTS = new Set(['.glb', '.gltf', '.jpg', '.jpeg', '.png', '.webp', '.mp4']);
 
-export { reconstructVideoFrames, sanitizeFileName, pruneUploads, type ReconstructResponse };
+export function sanitizeFileName(name: string, fallback = 'file'): string {
+  const base = path.basename(name || fallback);
+  const ext = path.extname(base).toLowerCase();
+  const safeExt = ALLOWED_UPLOAD_EXTS.has(ext) ? ext : '.glb';
+  const cleanBase = base.slice(0, base.length - ext.length).replace(/[^a-zA-Z0-9_-]/g, '_') || fallback;
+  return `${cleanBase}${safeExt}`;
+}
+
+export function pruneUploads(dir: string, maxFiles = 20, maxAgeMs = 24 * 3600 * 1000): void {
+  try {
+    const now = Date.now();
+    const files = fs.readdirSync(dir)
+      .filter((f) => f.startsWith('project_') && f.endsWith('.glb'))
+      .map((f) => {
+        const fullPath = path.join(dir, f);
+        return { path: fullPath, mtime: fs.statSync(fullPath).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+
+    files.forEach((file, index) => {
+      if (index >= maxFiles || (now - file.mtime) > maxAgeMs) {
+        fs.unlinkSync(file.path);
+      }
+    });
+  } catch {
+    // Non-critical background disk cleanup
+  }
+}
 
 // Automatically load local .env if present
 try {
@@ -124,21 +146,7 @@ function recordPinFailure(ip: string): void {
   }
 }
 
-app.post('/api/3d/reconstruct-video', async (req, res) => {
-  try {
-    const { framesBase64, fileName } = req.body;
-    if (!framesBase64 || !Array.isArray(framesBase64) || framesBase64.length === 0) {
-      return res.status(400).json({ error: 'No frames provided' });
-    }
-    const safeName = sanitizeFileName(fileName || 'walkthrough');
-    const result = await reconstructVideoFrames(framesBase64, safeName);
-    return res.json(result);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Reconstruction failed';
-    const status = (msg.includes('Cloud 3D GPU failed') || msg.includes('Hugging Face')) ? 502 : 500;
-    return res.status(status).json({ error: msg });
-  }
-});
+
 
 // 1. Save or update a project with PIN protection
 app.post('/api/projects/save', (req, res) => {

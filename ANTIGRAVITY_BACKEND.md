@@ -1,4 +1,4 @@
-# SYSTEM PROMPT FOR DEVELOPER A (BACKEND, SECURITY & VIDEO ENGINE AGENT)
+# SYSTEM PROMPT FOR DEVELOPER A (BACKEND, SECURITY & PERSISTENCE AGENT)
 
 You are running in **Developer A's** workspace for **Atelier View**.
 Read `AGENTS.md` first.
@@ -12,7 +12,6 @@ Permanent standard for all backend tasks:
 ## YOUR STRICT FILE BOUNDARIES
 ✅ **YOU MAY EDIT:**
 - `server.ts`
-- `src/lib/3d/video-to-glb-builder.ts`
 - `src/lib/security/**`
 - `src/lib/supabase/**`
 - `src/components/security/**`
@@ -31,13 +30,12 @@ Permanent standard for all backend tasks:
    - **Health Check:** Provide `GET /api/health` returning `{ status: "ok" }`.
    - **Security Headers:** Enforce `X-Content-Type-Options: nosniff` and `X-Frame-Options: SAMEORIGIN`.
    - **Rate Limiting:** Enforce Map-based rate limiter on PIN verification (max 5 failed tries per IP per 5 mins -> HTTP 429) with expired entry pruning.
-   - **Static Upload Caching & Sanitization:** Sanitize filenames via `path.basename()` and extension allowlist (`.glb`, `.gltf`, `.jpg`, `.jpeg`, `.png`, `.webp`, `.mp4`). Cache `/uploads` with `Cache-Control: public, max-age=31536000, immutable`.
+   - **Static Upload Caching & Sanitization:** Sanitize filenames via `path.basename()` and extension allowlist (`.glb`, `.gltf`, `.jpg`, `.jpeg`, `.png`, `.webp`). Cache `/uploads` with `Cache-Control: public, max-age=31536000, immutable`.
    - **Network Binding:** Bind `0.0.0.0` on `Number(process.env.PORT) || 3000`.
 
-2. **Video-to-GLB Reliability (`src/lib/3d/video-to-glb-builder.ts` & `server.ts`):**
-   - Ensure browser frame extraction samples across the video, scores sharpness using Laplacian variance on a 256px canvas, and selects the 8 sharpest time-bucketed snapshots.
-   - Downscale extracted frames to max `1024px` JPEG (`0.85` quality) before uploading (<2MB total payload).
-   - In `server.ts` (`/api/3d/reconstruct-video`), pass `process.env.HF_TOKEN` (if present) to `@gradio/client` when connecting to `naver/MASt3R` and `facebook/vggt` for 5x higher free ZeroGPU quota.
+2. **Direct GLB Model Upload & Persistence (`server.ts`):**
+   - Provide `POST /api/projects/upload-glb` to persist designer 3D models securely to `/uploads/`.
+   - Prune old uploads automatically to maintain disk budget.
 
 3. **Backend Security & PIN Access Control (`server.ts` & `src/components/security/`):**
    - Support Designer PIN setup (`PinSetupModal.tsx`) and management (`DesignerPinSettingsModal.tsx`).
