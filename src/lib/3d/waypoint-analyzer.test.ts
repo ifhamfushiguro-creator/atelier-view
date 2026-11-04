@@ -140,3 +140,80 @@ test('calculateWalkStep steps up onto stair treads within step threshold', () =>
   assert.ok(step.floorY >= 0.25, `Should step up onto stair tread, got floorY=${step.floorY}`);
   assert.equal(step.nextPos.y, step.floorY + EYE_HEIGHT);
 });
+
+test('generates camera sightlines pointing down open corridor in asymmetrical L-shaped room', () => {
+  const root = new THREE.Group();
+
+  // Floor: 6m x 14m at y = 0
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(6, 0.2, 14), new THREE.MeshStandardMaterial());
+  floor.position.set(0, 0, 0);
+
+  // Ceiling: 6m x 14m at y = 3
+  const ceiling = new THREE.Mesh(new THREE.BoxGeometry(6, 0.2, 14), new THREE.MeshStandardMaterial());
+  ceiling.position.set(0, 3, 0);
+
+  // Close east wall at x = 1.0 (corridor width = 2m, close wall 1m away)
+  const eastWall = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3, 14), new THREE.MeshStandardMaterial());
+  eastWall.position.set(1.0, 1.5, 0);
+
+  // Close west wall at x = -1.0
+  const westWall = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3, 14), new THREE.MeshStandardMaterial());
+  westWall.position.set(-1.0, 1.5, 0);
+
+  // Close south end cap at z = 1.5
+  const southWall = new THREE.Mesh(new THREE.BoxGeometry(2.2, 3, 0.2), new THREE.MeshStandardMaterial());
+  southWall.position.set(0, 1.5, 1.5);
+
+  // Long corridor extending down negative Z towards far north wall at z = -6.5 (8m open corridor)
+  const northWall = new THREE.Mesh(new THREE.BoxGeometry(2.2, 3, 0.2), new THREE.MeshStandardMaterial());
+  northWall.position.set(0, 1.5, -6.5);
+
+  root.add(floor, ceiling, eastWall, westWall, southWall, northWall);
+  root.updateMatrixWorld(true);
+
+  const floors = analyzeBuildingFloorsAndRooms(root);
+  assert.ok(floors.length >= 1);
+  const rooms = floors[0].rooms;
+  assert.ok(rooms.length >= 1);
+
+  // For every room waypoint inside this corridor, the targetLookAt must point down the long open corridor (dirZ < 0)
+  rooms.forEach((wp) => {
+    assert.ok(wp.targetLookAt, 'Waypoint must have targetLookAt');
+    const dirZ = wp.targetLookAt[2] - wp.position[2];
+    assert.ok(dirZ < 0, `Sightline must point down the open corridor (-Z), got dirZ=${dirZ}`);
+  });
+});
+
+test('analyzeBuildingFloorsAndRooms partitions 2-story buildings (H >= 3.2m) into non-overlapping Floor 01 and Floor 02', () => {
+  const root = new THREE.Group();
+  // A 2-story building with total height 3.4m (>= 3.2m)
+  const floor1 = new THREE.Mesh(new THREE.BoxGeometry(10, 0.2, 10), new THREE.MeshStandardMaterial());
+  floor1.position.set(0, 0, 0);
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(10, 3.4, 10), new THREE.MeshStandardMaterial());
+  wall.position.set(0, 1.7, 0);
+  root.add(floor1, wall);
+  root.updateMatrixWorld(true);
+
+  const floors = analyzeBuildingFloorsAndRooms(root);
+  assert.equal(floors.length, 2, 'Must detect 2 distinct floors for H >= 3.2m');
+  assert.equal(floors[0].floorNumber, 1);
+  assert.equal(floors[1].floorNumber, 2);
+  assert.equal(floors[0].label, 'Floor 01 — Ground Level');
+  assert.equal(floors[1].label, 'Floor 02 — Upper Residence');
+
+  // Strict non-overlapping invariant: floor2.minY === floor1.maxY
+  assert.equal(floors[0].maxY, floors[1].minY, 'Floor 01 maxY must match Floor 02 minY with zero overlap');
+
+  const box = new THREE.Box3().setFromObject(root);
+  const minY = box.min.y;
+  const H = box.max.y - minY;
+  assert.ok(Math.abs(floors[0].maxY - (minY + H * 0.32)) < 0.02, `Floor 01 maxY must be minY + H * 0.32, got ${floors[0].maxY}`);
+  assert.ok(Math.abs(floors[1].minY - (minY + H * 0.32)) < 0.02, `Floor 02 minY must be minY + H * 0.32, got ${floors[1].minY}`);
+  assert.ok(Math.abs(floors[1].maxY - (minY + H * 0.64)) < 0.02, `Floor 02 maxY must be minY + H * 0.64, got ${floors[1].maxY}`);
+  assert.ok(Math.abs(floors[0].cutY - (minY + H * 0.23)) < 0.02, `Floor 01 cutY must be minY + H * 0.23, got ${floors[0].cutY}`);
+  assert.ok(Math.abs(floors[1].cutY - (minY + H * 0.50)) < 0.02, `Floor 02 cutY must be minY + H * 0.50, got ${floors[1].cutY}`);
+  assert.ok(floors[1].bottomCutY !== undefined && Math.abs(floors[1].bottomCutY - (minY + H * 0.30)) < 0.02, `Floor 02 bottomCutY must be minY + H * 0.30, got ${floors[1].bottomCutY}`);
+
+  assert.ok(floors[0].rooms.length >= 1);
+  assert.ok(floors[1].rooms.length >= 1);
+});

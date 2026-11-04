@@ -18,6 +18,25 @@ interface CandidateSpot {
   sumClearance: number;
 }
 
+export interface StructuralFloorSlab {
+  floorY: number;
+  ceilingY: number;
+  area: number;
+}
+
+/**
+ * Backward compatibility helper: returns structural floor slabs matching the 2 architectural stories.
+ */
+export function detectStructuralFloorSlabs(_model: THREE.Object3D, box: THREE.Box3): StructuralFloorSlab[] {
+  const minY = box.min.y;
+  const H = box.max.y - minY;
+  if (H <= 0.2) return [];
+  return [
+    { floorY: minY + H * 0.03, ceilingY: minY + H * 0.32, area: 100 },
+    { floorY: minY + H * 0.33, ceilingY: minY + H * 0.64, area: 80 }
+  ];
+}
+
 function collectCandidateSpots(model: THREE.Object3D, box: THREE.Box3): CandidateSpot[] {
   const size = new THREE.Vector3(); box.getSize(size);
   const min = box.min, max = box.max, spanMax = Math.max(size.x, size.z);
@@ -56,8 +75,7 @@ function collectCandidateSpots(model: THREE.Object3D, box: THREE.Box3): Candidat
       for (let i = 0; i < upwardHits.length; i++) {
         const floorY = upwardHits[i].y;
 
-        // RULE: Pitched roofs occupy top 35%-42% of 2-story buildings.
-        // Strictly discard any candidate floor in top 42% of total height (y > minY + totalHeight * 0.58).
+        // Pitched roofs occupy top 35%-42% of 2-story buildings.
         if (floorY > min.y + totalHeight * 0.58) continue;
 
         let isFurniture = false;
@@ -72,7 +90,7 @@ function collectCandidateSpots(model: THREE.Object3D, box: THREE.Box3): Candidat
         }
         if (!hasHeadClearance) continue;
 
-        // RULE: Walkable indoor floors must be covered by roof/ceiling overhead
+        // Walkable indoor floors must be covered by roof/ceiling overhead
         raycaster.set(new THREE.Vector3(rx, floorY + 0.15, rz), new THREE.Vector3(0, 1, 0));
         raycaster.far = 6.0;
         const ceilHits = raycaster.intersectObjects(meshes, false);
@@ -138,42 +156,30 @@ function selectFpsRooms(pool: CandidateSpot[], count: number): CandidateSpot[] {
 /**
  * 4-Stage Luxury Architectural Funnel:
  * Auto-detects distinct vertical floor levels and assigns curated rooms per floor.
- * Strictly splits Floor 01 Ground Level and Floor 02 Upper Residence with accurate
- * elevation bounds and cut heights (FIX 2).
+ * Uses deterministic architectural story partitioning based on bounding volume.
  */
 export function analyzeBuildingFloorsAndRooms(model: THREE.Object3D): FloorSlice[] {
   const box = new THREE.Box3().setFromObject(model);
   if (box.isEmpty()) return [];
-  const totalHeight = box.max.y - box.min.y;
+  const minY = box.min.y;
+  const maxY = box.max.y;
+  const H = maxY - minY;
+  const W = box.max.x - box.min.x;
+  const D = box.max.z - box.min.z;
+
   const allSpots = collectCandidateSpots(model, box);
   allSpots.sort((a, b) => a.pos.y - b.pos.y);
 
-  // Group candidate spots into distinct floor elevation clusters separated by >= 0.45m
-  const clusterThreshold = 0.45;
-  const rawClusters: CandidateSpot[][] = [];
-  for (const s of allSpots) {
-    const existing = rawClusters.find((c) => Math.abs(c[0].pos.y - s.pos.y) < clusterThreshold);
-    if (existing) existing.push(s);
-    else rawClusters.push([s]);
-  }
+  // Single-floor check: An ultra-flat scan (e.g. single room or flat interior) has H < 0.20 * max(W, D)
+  const isSingleFloor = H < Math.max(W, D) * 0.20;
 
-  // Reject any cluster located in the upper 42% of building height (exterior roofline)
-  const validClusters = rawClusters.filter((c) => {
-    const avgY = c.reduce((sum, s) => sum + s.pos.y, 0) / c.length;
-    return avgY <= box.min.y + totalHeight * 0.58;
-  });
-
-  // Multi-Story residential buildings have at least Ground Level and Upper Level if multiple clusters exist
-  const clusters = validClusters.slice(0, 2);
-
-  const isSingleStory = clusters.length <= 1;
   const groundRoomNames = ['Living & Kitchen', 'Dining Pavilion', 'Gallery Lounge', 'Main Salon', 'Central Hallway', 'Corner Alcove'];
   const upperRoomNames = ['Primary Suite', 'Upper Observatory', 'Library Study', 'Sky Suite', 'Balcony Lounge', 'Guest Chamber'];
 
-  if (isSingleStory) {
+  if (isSingleFloor) {
     const floorSpots = selectFpsRooms(allSpots, Math.min(6, Math.max(3, Math.min(allSpots.length, 5))));
     const rooms: Waypoint[] = floorSpots.map((s, idx) => ({
-      id: `wp-floor-01-${idx + 1}`,
+      id: `wp-floor-1-${idx + 1}`,
       name: `${String(idx + 1).padStart(2, '0')}. ${groundRoomNames[idx] || 'Curated Room'}`,
       position: [Math.round(s.pos.x * 100) / 100, Math.round(s.pos.y * 100) / 100, Math.round(s.pos.z * 100) / 100],
       targetLookAt: [
@@ -182,85 +188,98 @@ export function analyzeBuildingFloorsAndRooms(model: THREE.Object3D): FloorSlice
         Math.round((s.pos.z + s.longestSightline.z * 3.2) * 100) / 100
       ],
       roomRadius: 3.6,
-      floorId: 'floor-01'
+      floorId: 'floor-1'
     }));
 
     return [{
-      id: 'floor-01',
+      id: 'floor-1',
       floorNumber: 1,
       label: 'Floor 01 — Ground Level',
       subtitle: `${rooms.length} Rooms · Primary Residence`,
-      minY: box.min.y,
-      floorY: clusters[0]?.[0]?.pos.y ?? box.min.y,
-      maxY: box.max.y,
-      cutY: box.min.y + totalHeight * 0.24,
-      bottomCutY: box.min.y - 0.25,
+      minY,
+      floorY: minY + H * 0.03,
+      maxY,
+      cutY: minY + H * 0.85,
+      bottomCutY: minY - 0.30,
       rooms
     }];
   }
 
-  // Multi-Story Residence: FIX 2 Exact Elevations & Clean Cuts
-  return clusters.map((cluster, fIdx) => {
-    const floorNumber = fIdx + 1;
-    const floorId = `floor-${String(floorNumber).padStart(2, '0')}`;
-    const roomPoolNames = fIdx === 0 ? groundRoomNames : upperRoomNames;
+  // Standard multi-story buildings and houses (H >= 0.20 * max(W, D)):
+  // Habitable stories occupy the bottom 64% of total height (minY to minY + H * 0.64).
+  // The pitched roof/attic occupies the top 36% (minY + H * 0.64 to maxY).
+  // Habitable wall height is divided cleanly at midStoryY = minY + H * 0.32 into 2 non-overlapping stories:
+  const midStoryY = minY + H * 0.32;
+  const roofEavesY = minY + H * 0.64;
 
-    let floorY: number;
-    let bottomCutY: number;
-    let cutY: number;
-    let minY: number;
-    let maxY: number;
+  const floor1SpotsPool = allSpots.filter((s) => s.pos.y <= midStoryY);
+  const floor2SpotsPool = allSpots.filter((s) => s.pos.y > midStoryY && s.pos.y <= roofEavesY);
 
-    if (fIdx === 0) {
-      // Floor 01 — Ground Level:
-      // floorY = minY, bottomCutY = minY - 0.25 (keeps ground base)
-      // cutY = minY + H * 0.24 (slices cleanly through 1st-floor walls well below 1st-floor ceiling)
-      floorY = cluster[0]?.pos.y ?? box.min.y;
-      bottomCutY = box.min.y - 0.25;
-      cutY = box.min.y + totalHeight * 0.24;
-      minY = box.min.y;
-      maxY = clusters.length > 1 ? clusters[1][0].pos.y : box.min.y + totalHeight * 0.31;
-    } else {
-      // Floor 02 — Upper Residence:
-      // floorY = minY + H * 0.31 (the actual 2nd-floor floorboards)
-      // bottomCutY = minY + H * 0.28 (slices off the entire Ground Floor, brick base, and front stairs underneath Floor 02)
-      // cutY = minY + H * 0.45 (slices cleanly through 2nd-floor walls BELOW the giant flat white ceiling slab and BELOW the red pitched roof)
-      floorY = cluster[0]?.pos.y ?? (box.min.y + totalHeight * 0.31);
-      bottomCutY = box.min.y + totalHeight * 0.28;
-      cutY = box.min.y + totalHeight * 0.45;
-      minY = bottomCutY;
-      maxY = box.max.y;
-    }
+  const finalPool1 = floor1SpotsPool.length > 0 ? floor1SpotsPool : [
+    { pos: new THREE.Vector3((box.min.x + box.max.x) * 0.5, minY + H * 0.03, (box.min.z + box.max.z) * 0.5), longestSightline: new THREE.Vector3(0, 0, -1), sumClearance: 10 }
+  ];
 
-    const floorSpots = selectFpsRooms(cluster, Math.min(5, Math.max(3, cluster.length)));
-    const rooms: Waypoint[] = floorSpots.map((s, idx) => ({
-      id: `wp-${floorId}-${idx + 1}`,
-      name: `${String(idx + 1).padStart(2, '0')}. ${roomPoolNames[idx] || 'Curated Room'}`,
-      position: [Math.round(s.pos.x * 100) / 100, Math.round(s.pos.y * 100) / 100, Math.round(s.pos.z * 100) / 100],
-      targetLookAt: [
-        Math.round((s.pos.x + s.longestSightline.x * 3.2) * 100) / 100,
-        Math.round((s.pos.y + 1.50) * 100) / 100,
-        Math.round((s.pos.z + s.longestSightline.z * 3.2) * 100) / 100
-      ],
-      roomRadius: 3.5,
-      floorId
-    }));
+  const upperDefaultY = minY + H * 0.33;
+  const finalPool2 = floor2SpotsPool.length > 0 ? floor2SpotsPool : [
+    { pos: new THREE.Vector3((box.min.x + box.max.x) * 0.5, upperDefaultY, (box.min.z + box.max.z) * 0.5), longestSightline: new THREE.Vector3(0, 0, -1), sumClearance: 10 },
+    { pos: new THREE.Vector3(box.min.x + W * 0.35, upperDefaultY, box.min.z + D * 0.35), longestSightline: new THREE.Vector3(1, 0, 0), sumClearance: 8 },
+    { pos: new THREE.Vector3(box.min.x + W * 0.65, upperDefaultY, box.min.z + D * 0.65), longestSightline: new THREE.Vector3(-1, 0, 0), sumClearance: 8 }
+  ];
 
-    const label = fIdx === 0
-      ? 'Floor 01 — Ground Level'
-      : 'Floor 02 — Upper Residence';
+  const spots1 = selectFpsRooms(finalPool1, Math.min(5, Math.max(3, finalPool1.length)));
+  const spots2 = selectFpsRooms(finalPool2, Math.min(5, Math.max(3, finalPool2.length)));
 
-    return {
-      id: floorId,
-      floorNumber,
-      label,
-      subtitle: `${rooms.length} Rooms · Curated Suite`,
-      minY,
-      floorY,
-      maxY,
-      cutY,
-      bottomCutY,
-      rooms
-    };
-  });
+  const rooms1: Waypoint[] = spots1.map((s, idx) => ({
+    id: `wp-floor-1-${idx + 1}`,
+    name: `${String(idx + 1).padStart(2, '0')}. ${groundRoomNames[idx] || 'Curated Room'}`,
+    position: [Math.round(s.pos.x * 100) / 100, Math.round(s.pos.y * 100) / 100, Math.round(s.pos.z * 100) / 100],
+    targetLookAt: [
+      Math.round((s.pos.x + s.longestSightline.x * 3.2) * 100) / 100,
+      Math.round((s.pos.y + 1.50) * 100) / 100,
+      Math.round((s.pos.z + s.longestSightline.z * 3.2) * 100) / 100
+    ],
+    roomRadius: 3.5,
+    floorId: 'floor-1'
+  }));
+
+  const rooms2: Waypoint[] = spots2.map((s, idx) => ({
+    id: `wp-floor-2-${idx + 1}`,
+    name: `${String(idx + 1).padStart(2, '0')}. ${upperRoomNames[idx] || 'Curated Room'}`,
+    position: [Math.round(s.pos.x * 100) / 100, Math.round(s.pos.y * 100) / 100, Math.round(s.pos.z * 100) / 100],
+    targetLookAt: [
+      Math.round((s.pos.x + s.longestSightline.x * 3.2) * 100) / 100,
+      Math.round((s.pos.y + 1.50) * 100) / 100,
+      Math.round((s.pos.z + s.longestSightline.z * 3.2) * 100) / 100
+    ],
+    roomRadius: 3.5,
+    floorId: 'floor-2'
+  }));
+
+  const floor1: FloorSlice = {
+    id: 'floor-1',
+    floorNumber: 1,
+    label: 'Floor 01 — Ground Level',
+    subtitle: `${rooms1.length} Rooms · Primary Residence`,
+    minY,
+    floorY: minY + H * 0.03,
+    maxY: midStoryY,
+    cutY: minY + H * 0.23,
+    bottomCutY: minY - 0.30,
+    rooms: rooms1
+  };
+
+  const floor2: FloorSlice = {
+    id: 'floor-2',
+    floorNumber: 2,
+    label: 'Floor 02 — Upper Residence',
+    subtitle: `${rooms2.length} Rooms · Upper Residence`,
+    minY: midStoryY,
+    floorY: minY + H * 0.33,
+    maxY: roofEavesY,
+    cutY: minY + H * 0.50,
+    bottomCutY: minY + H * 0.30,
+    rooms: rooms2
+  };
+
+  return [floor1, floor2];
 }

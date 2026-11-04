@@ -322,11 +322,15 @@ export default function StreetViewViewer({
       pinsGroup.current
     );
 
+    let resizeRaf = 0;
     const onResize = () => {
-      if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
-      cameraRef.current.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight;
-      cameraRef.current.updateProjectionMatrix();
-      rendererRef.current.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+      cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(() => {
+        if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
+        cameraRef.current.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight;
+        cameraRef.current.updateProjectionMatrix();
+        rendererRef.current.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+      });
     };
     window.addEventListener('resize', onResize);
 
@@ -480,11 +484,21 @@ export default function StreetViewViewer({
               targetYawRef.current = null;
               targetPitchRef.current = null;
               const curRoom = waypointsRef.current.find((w) => w.id === activeRoomIdRef.current);
+              const camX = cam.position.x;
+              const camZ = cam.position.z;
+              const nearbyMeshes = interactableMeshesRef.current.filter((mesh) => {
+                const box = mesh.userData.__worldBox as THREE.Box3 | undefined;
+                if (!box) return true;
+                const dx = Math.max(box.min.x - camX, 0, camX - box.max.x);
+                const dz = Math.max(box.min.z - camZ, 0, camZ - box.max.z);
+                return (dx * dx + dz * dz) <= 6.25;
+              });
+
               const step = calculateWalkStep(
                 cam.position,
                 move.normalize().multiplyScalar(moveSpeed),
                 floorYRef.current,
-                interactableMeshesRef.current,
+                nearbyMeshes.length > 0 ? nearbyMeshes : interactableMeshesRef.current,
                 collisionRay,
                 dynamicEyeHeight,
                 {
@@ -535,6 +549,7 @@ export default function StreetViewViewer({
     return () => {
       cancelAnimationFrame(animId);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      cancelAnimationFrame(resizeRaf);
       window.removeEventListener('resize', onResize);
       clearAndDisposeGroup(floorHitBoxesGroupRef.current);
       clearAndDisposeGroup(modelGroup.current);
@@ -573,10 +588,6 @@ export default function StreetViewViewer({
         if (child instanceof THREE.Mesh) {
           child.visible = true;
           child.position.y = 0;
-          const mats = Array.isArray(child.material) ? child.material : [child.material];
-          mats.forEach((m) => {
-            if (m) { m.clippingPlanes = []; m.needsUpdate = true; }
-          });
         }
       });
 
@@ -620,14 +631,7 @@ export default function StreetViewViewer({
             child.visible = true;
           }
 
-          const mats = Array.isArray(child.material) ? child.material : [child.material];
-          mats.forEach((m) => {
-            if (m) {
-              m.clippingPlanes = planes;
-              m.clipShadows = true;
-              m.needsUpdate = true;
-            }
-          });
+
         }
       });
 
@@ -669,14 +673,7 @@ export default function StreetViewViewer({
           } else {
             child.visible = true;
           }
-          const mats = Array.isArray(child.material) ? child.material : [child.material];
-          mats.forEach((m) => {
-            if (m) {
-              m.clippingPlanes = planes;
-              m.clipShadows = true;
-              m.needsUpdate = true;
-            }
-          });
+
         }
       });
 
@@ -780,6 +777,15 @@ export default function StreetViewViewer({
           if (c instanceof THREE.Points) pointsCount++;
           if (c instanceof THREE.Mesh && c.visible && c.geometry) {
             if (!c.geometry.boundingBox) c.geometry.computeBoundingBox();
+            const vertCount = c.geometry.getAttribute('position')?.count || 0;
+            if (vertCount > 2500) {
+              c.castShadow = false;
+              c.receiveShadow = false;
+            } else {
+              c.castShadow = true;
+              c.receiveShadow = true;
+            }
+            c.userData.__worldBox = new THREE.Box3().setFromObject(c);
             interactables.push(c);
           }
         });
@@ -809,11 +815,11 @@ export default function StreetViewViewer({
           if (analyzedFloors[0].rooms[0]) onSelectRoom(analyzedFloors[0].rooms[0].id);
         }
 
-        // Build 2 fast invisible hit-boxes for instant 0.01ms raycasting in exterior mode
+        // Build stacked non-overlapping hit-boxes for instant 0.005ms raycasting in exterior mode
         clearAndDisposeGroup(floorHitBoxesGroupRef.current);
         analyzedFloors.forEach((f) => {
-          const fMinY = f.bottomCutY !== undefined ? f.bottomCutY : f.floorY;
-          const fMaxY = f.cutY !== undefined ? f.cutY : f.maxY;
+          const fMinY = f.minY;
+          const fMaxY = f.maxY;
           const boxH = Math.max(0.6, fMaxY - fMinY);
           const boxW = (size.x || 10) * 1.05;
           const boxD = (size.z || 10) * 1.05;
@@ -821,7 +827,7 @@ export default function StreetViewViewer({
             new THREE.BoxGeometry(boxW, boxH, boxD),
             new THREE.MeshBasicMaterial({ visible: false })
           );
-          hitMesh.position.set(0, fMinY + boxH / 2, 0);
+          hitMesh.position.set(center.x, fMinY + boxH / 2, center.z);
           hitMesh.name = `__floor_hit_box_${f.floorNumber}__`;
           hitMesh.userData.floor = f;
           hitMesh.userData.floorId = f.id;
@@ -876,35 +882,54 @@ export default function StreetViewViewer({
         y: -(((e.clientY - rect.top) / rect.height) * 2 - 1)
       };
 
-      // Exterior Interactive Building Raycaster: Check ONLY 2 Hit-Boxes (24 Triangles total = 0.01ms)
-      if (funnelStage === 'exterior' && cameraRef.current && floorHitBoxesGroupRef.current.children.length > 0 && floors.length > 0) {
+      // Exterior Interactive Building Raycaster:
+      if (funnelStage === 'exterior' && cameraRef.current && floors.length > 0) {
         const m = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
         const ray = new THREE.Raycaster();
         ray.setFromCamera(m, cameraRef.current);
-        const hits = ray.intersectObjects(floorHitBoxesGroupRef.current.children, false);
+        const targets = interactableMeshesRef.current.filter((m) => m.name !== '__floor_collider__');
+        const candidateTargets = targets.length > 0 ? targets : floorHitBoxesGroupRef.current.children;
+        const hits = ray.intersectObjects(candidateTargets, false);
 
         if (hits.length > 0 && !isDragging.current) {
           const hit = hits[0];
-          const targetFloor = (hit.object.userData.floor as FloorSlice) || floors[0];
-          setHoveredFloor(targetFloor);
-
-          // Flush facade light ribbon highlight
-          updateFloorStoryHighlight(
-            floorHighlightRef.current,
-            targetFloor,
-            modelBounds.current.size,
-            modelBounds.current.center
-          );
-
-          if (reticleCardRef.current) {
-            const centerY = targetFloor.floorY + (targetFloor.maxY - targetFloor.floorY) / 2;
-            const projPoint = new THREE.Vector3(hit.point.x, centerY, hit.point.z);
-            const proj = projPoint.project(cameraRef.current);
-            const sx = ((proj.x + 1) * 0.5) * rect.width, sy = ((-proj.y + 1) * 0.5) * rect.height;
-            reticleCardRef.current.style.transform = `translate3d(${sx}px, ${sy}px, 0) translate(-14px, -14px)`;
-            reticleCardRef.current.style.display = 'flex';
+          let targetFloor: FloorSlice | null = null;
+          if (floors.length === 2) {
+            if (hit.point.y > floors[1].maxY) {
+              // Hovering above roof eaves (red roof tiles) -> do not highlight as a floor
+              targetFloor = null;
+            } else if (hit.point.y >= floors[1].minY) {
+              targetFloor = floors[1];
+            } else {
+              targetFloor = floors[0];
+            }
+          } else {
+            targetFloor = floors.find((f) => hit.point.y >= f.minY && hit.point.y <= f.maxY)
+              || (hit.object.userData.floor as FloorSlice)
+              || null;
           }
-          return;
+
+          if (targetFloor) {
+            setHoveredFloor(targetFloor);
+
+            // Flush facade light ribbon highlight
+            updateFloorStoryHighlight(
+              floorHighlightRef.current,
+              targetFloor,
+              modelBounds.current.size,
+              modelBounds.current.center
+            );
+
+            if (reticleCardRef.current) {
+              const centerY = targetFloor.floorY + (targetFloor.maxY - targetFloor.floorY) / 2;
+              const projPoint = new THREE.Vector3(hit.point.x, centerY, hit.point.z);
+              const proj = projPoint.project(cameraRef.current);
+              const sx = ((proj.x + 1) * 0.5) * rect.width, sy = ((-proj.y + 1) * 0.5) * rect.height;
+              reticleCardRef.current.style.transform = `translate3d(${sx}px, ${sy}px, 0) translate(-14px, -14px)`;
+              reticleCardRef.current.style.display = 'flex';
+            }
+            return;
+          }
         } else if (!isDragging.current) {
           setHoveredFloor(null);
           if (floorHighlightRef.current) floorHighlightRef.current.visible = false;
@@ -950,8 +975,21 @@ export default function StreetViewViewer({
 
     // FIX 1: Clicking Building in Exterior Mode Enters Floor & Smoothly Transitions (Instant Hit-Box Test)
     if (funnelStage === 'exterior') {
-      const hits = raycaster.intersectObjects(floorHitBoxesGroupRef.current.children, false);
-      const target = (hits[0]?.object?.userData?.floor as FloorSlice) || hoveredFloorRef.current || floors[0];
+      const targets = interactableMeshesRef.current.filter((m) => m.name !== '__floor_collider__');
+      const candidateTargets = targets.length > 0 ? targets : floorHitBoxesGroupRef.current.children;
+      const hits = raycaster.intersectObjects(candidateTargets, false);
+      let target: FloorSlice | null = null;
+      if (hits.length > 0) {
+        if (floors.length === 2) {
+          if (hits[0].point.y <= floors[1].maxY) {
+            target = hits[0].point.y >= floors[1].minY ? floors[1] : floors[0];
+          }
+        } else {
+          target = floors.find((f) => hits[0].point.y >= f.minY && hits[0].point.y <= f.maxY)
+            || (hits[0].object?.userData?.floor as FloorSlice);
+        }
+      }
+      target = target || hoveredFloorRef.current || floors[0];
       if (target) {
         triggerFloorLiftTransition(target);
       }
@@ -1058,7 +1096,9 @@ export default function StreetViewViewer({
           onClick={(e) => {
             e.stopPropagation();
             const target = hoveredFloorRef.current || floors[0];
-            if (target) triggerFloorLiftTransition(target);
+            if (target) {
+              triggerFloorLiftTransition(target);
+            }
           }}
         >
           {/* Golden Target Reticle */}

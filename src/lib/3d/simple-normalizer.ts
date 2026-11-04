@@ -4,31 +4,59 @@ export type VisualPolishMode = 'sweet-spot' | 'white-clay' | 'cyber-blueprint';
 export type FunnelStage = 'exterior' | 'floorplan' | 'room-view' | 'room-walk';
 
 export interface Waypoint {
-  id: string; name: string; position: [number, number, number];
-  targetLookAt?: [number, number, number]; roomRadius?: number; floorId?: string;
+  id: string;
+  name: string;
+  position: [number, number, number];
+  targetLookAt?: [number, number, number];
+  roomRadius?: number;
+  floorId?: string;
 }
 
 export interface FloorSlice {
-  id: string; floorNumber: number; label: string; subtitle: string;
-  minY: number; floorY: number; maxY: number; cutY: number; bottomCutY?: number; rooms: Waypoint[];
+  id: string;
+  floorNumber: number;
+  label: string;
+  subtitle: string;
+  minY: number;
+  floorY: number;
+  maxY: number;
+  cutY: number;
+  bottomCutY?: number;
+  rooms: Waypoint[];
 }
 
 export interface SpatialPinItem {
-  id: string; title: string; targetObject: string; prompt: string;
-  position: [number, number, number]; priceDelta: number; status: 'approved' | 'pending';
-  beforeLabel?: string; afterLabel?: string;
+  id: string;
+  title: string;
+  targetObject: string;
+  prompt: string;
+  position: [number, number, number];
+  priceDelta: number;
+  status: 'approved' | 'pending';
+  beforeLabel?: string;
+  afterLabel?: string;
 }
 
 export interface StreetViewViewerProps {
-  modelUrl?: string | null; visualMode: VisualPolishMode; navMode: 'walk' | 'drone';
-  funnelStage: FunnelStage; onFunnelStageChange: (stage: FunnelStage) => void;
-  floors: FloorSlice[]; onFloorsChange: (floors: FloorSlice[]) => void;
-  activeFloorId: string | null; onSelectFloor: (id: string) => void;
-  activeRoomId: string | null; onSelectRoom: (id: string) => void;
-  pins: SpatialPinItem[]; selectedPinId: string | null;
-  onSelectPin: (id: string) => void; onAddPin: (position: [number, number, number]) => void;
-  waypoints: Waypoint[]; onWaypointsChange: (wps: Waypoint[]) => void;
-  activeWaypointId: string | null; onSelectWaypoint: (id: string) => void;
+  modelUrl?: string | null;
+  visualMode: VisualPolishMode;
+  navMode: 'walk' | 'drone';
+  funnelStage: FunnelStage;
+  onFunnelStageChange: (stage: FunnelStage) => void;
+  floors: FloorSlice[];
+  onFloorsChange: (floors: FloorSlice[]) => void;
+  activeFloorId: string | null;
+  onSelectFloor: (id: string) => void;
+  activeRoomId: string | null;
+  onSelectRoom: (id: string) => void;
+  pins: SpatialPinItem[];
+  selectedPinId: string | null;
+  onSelectPin: (id: string) => void;
+  onAddPin: (position: [number, number, number]) => void;
+  waypoints: Waypoint[];
+  onWaypointsChange: (wps: Waypoint[]) => void;
+  activeWaypointId: string | null;
+  onSelectWaypoint: (id: string) => void;
   onCameraUpdate?: (pos: [number, number, number]) => void;
   onLoadingChange?: (loading: boolean, progress: number) => void;
 }
@@ -85,7 +113,10 @@ export function applyVisualPolish(
     }
 
     const hasVertexColors = Boolean(mesh.geometry?.getAttribute('color'));
-    let wireChild = mesh.getObjectByName('__wireframe_child__') as THREE.Mesh | undefined;
+    const oldWireChild = mesh.getObjectByName('__wireframe_child__');
+    if (oldWireChild) {
+      mesh.remove(oldWireChild);
+    }
 
     // Dispose old non-pristine runtime materials
     if (mesh.material && mesh.material !== pristine) {
@@ -93,9 +124,8 @@ export function applyVisualPolish(
       else mesh.material.dispose();
     }
 
-    // 3. Apply viewing mode using fresh material instances
+    // 3. Apply viewing mode using fresh material instances (Task 1.2: zero duplicate child meshes)
     if (mode === 'sweet-spot') {
-      if (wireChild) wireChild.visible = false;
       if (activeMap) {
         mesh.material = new THREE.MeshBasicMaterial({
           map: activeMap,
@@ -105,7 +135,7 @@ export function applyVisualPolish(
           polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
         });
       } else if (hasVertexColors) {
-        // MASt3R triangulated mesh vertex colors: MeshBasicMaterial for vivid photorealism
+        // MASt3R triangulated mesh vertex colors: MeshBasicMaterial for vivid photorealism (SACRED INVARIANT 1)
         mesh.material = new THREE.MeshBasicMaterial({
           vertexColors: true, side: THREE.DoubleSide,
           polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
@@ -119,22 +149,20 @@ export function applyVisualPolish(
         });
       }
     } else if (mode === 'white-clay') {
-      if (wireChild) wireChild.visible = false;
       mesh.material = new THREE.MeshStandardMaterial({
         color: '#D6D3CD', roughness: 0.88, metalness: 0.05, side: THREE.DoubleSide,
         polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
       });
     } else if (mode === 'cyber-blueprint') {
-      mesh.material = new THREE.MeshStandardMaterial({
-        color: '#0D131A', roughness: 0.8, metalness: 0.1, side: THREE.DoubleSide,
-        polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
+      // Direct obsidian wireframe material on mesh without duplicate child meshes
+      mesh.material = new THREE.MeshBasicMaterial({
+        color: '#10B981',
+        wireframe: true,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1
       });
-      if (!wireChild && mesh.geometry) {
-        wireChild = new THREE.Mesh(mesh.geometry, new THREE.MeshBasicMaterial({ color: '#10B981', wireframe: true, transparent: true, opacity: 0.35 }));
-        wireChild.name = '__wireframe_child__';
-        mesh.add(wireChild);
-      }
-      if (wireChild) wireChild.visible = true;
     }
   });
 
@@ -142,21 +170,4 @@ export function applyVisualPolish(
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = mode === 'white-clay' ? 1.15 : mode === 'cyber-blueprint' ? 1.0 : 1.05;
   }
-}
-
-/**
- * Geometric fallback waypoints inside model footprint.
- */
-export function generateFloorWaypoints(model: THREE.Object3D): Waypoint[] {
-  const b = new THREE.Box3().setFromObject(model), y = b.min.y;
-  const cx = (b.min.x + b.max.x) / 2, cz = (b.min.z + b.max.z) / 2;
-  const sx = Math.max((b.max.x - b.min.x) * 0.28, 1.8), sz = Math.max((b.max.z - b.min.z) * 0.28, 1.8);
-  return [
-    { id: 'wp-1', name: 'Room Center 01', position: [cx, y, cz] },
-    { id: 'wp-2', name: 'Gallery Walk 02', position: [cx, y, cz + sz * 0.7] },
-    { id: 'wp-3', name: 'North Alcove 03', position: [cx, y, cz - sz * 0.9] },
-    { id: 'wp-4', name: 'South Salon 04', position: [cx, y, cz + sz * 0.9] },
-    { id: 'wp-5', name: 'East Gallery 05', position: [cx + sx * 0.9, y, cz] },
-    { id: 'wp-6', name: 'West Parlor 06', position: [cx - sx * 0.9, y, cz] }
-  ];
 }

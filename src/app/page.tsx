@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
   Upload,
   Video,
@@ -58,6 +58,16 @@ export default function SpatialWorkspacePage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const activeBlobUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (activeBlobUrlRef.current && activeBlobUrlRef.current.startsWith('blob:')) {
+        URL.revokeObjectURL(activeBlobUrlRef.current);
+        activeBlobUrlRef.current = null;
+      }
+    };
+  }, []);
 
   const BASE_BUDGET = 120000;
   const approvedUpgrades = useMemo(() => {
@@ -103,9 +113,12 @@ export default function SpatialWorkspacePage() {
   };
 
   const loadFileFromBlob = (url: string, fileName: string) => {
-    if (modelUrl.startsWith('blob:')) {
-      const oldUrl = modelUrl;
-      setTimeout(() => URL.revokeObjectURL(oldUrl), 1000);
+    if (activeBlobUrlRef.current && activeBlobUrlRef.current.startsWith('blob:') && activeBlobUrlRef.current !== url) {
+      URL.revokeObjectURL(activeBlobUrlRef.current);
+      activeBlobUrlRef.current = null;
+    }
+    if (url.startsWith('blob:')) {
+      activeBlobUrlRef.current = url;
     }
     setModelUrl(url);
     setModelFileName(fileName);
