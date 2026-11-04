@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
   applyVisualPolish,
   type VisualPolishMode,
@@ -244,14 +245,14 @@ export default function StreetViewViewer({
     }
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(46, w / h, 0.15, 400);
+    const camera = new THREE.PerspectiveCamera(46, w / h, 0.25, 1200);
     camera.position.set(0, 0.95, 2.85);
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
-      logarithmicDepthBuffer: true,
+      logarithmicDepthBuffer: false,
       powerPreference: 'high-performance'
     });
     if (!modelUrlRef.current) {
@@ -264,15 +265,29 @@ export default function StreetViewViewer({
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.08;
     renderer.localClippingEnabled = true;
+
+    // Anderson Mancini & Edan Kwan 120 FPS PBR Shadow Architecture:
+    // PCFSoftShadowMap enabled, but autoUpdate set to false so shadows re-render 0 times per frame!
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.autoUpdate = false;
+    renderer.shadowMap.needsUpdate = true;
+
     rendererRef.current = renderer;
     container.appendChild(renderer.domElement);
 
-    // PDF Field Guide 3-Light Setup: Sun 2.0 (1024 shadow map), Sky 1.1, Cool Fill 0.5
+    // Realistic PBR RoomEnvironment reflections via PMREMGenerator
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
+    const roomEnv = new RoomEnvironment();
+    scene.environment = pmremGenerator.fromScene(roomEnv, 0.04).texture;
+
+    // PDF Field Guide 3-Light Setup: Sun 2.0 (2048x2048 soft shadow map), Sky 1.1, Cool Fill 0.5
     const sunLight = new THREE.DirectionalLight(0xffefd7, 2.0);
     sunLight.position.set(18, 28, 16);
     sunLight.castShadow = true;
-    sunLight.shadow.mapSize.width = 1024;
-    sunLight.shadow.mapSize.height = 1024;
+    sunLight.shadow.mapSize.width = 2048;
+    sunLight.shadow.mapSize.height = 2048;
     sunLight.shadow.bias = -0.0001;
     sunLight.shadow.camera.near = 1;
     sunLight.shadow.camera.far = 80;
@@ -562,6 +577,7 @@ export default function StreetViewViewer({
         disposeMaterial(ceilingPlaneRef.current.material);
         ceilingPlaneRef.current = null;
       }
+      pmremGenerator.dispose();
       renderer.dispose();
       if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement);
     };
@@ -701,6 +717,11 @@ export default function StreetViewViewer({
         }
       }
     }
+
+    // Anderson Mancini rule: Trigger static shadow map re-render only upon stage change
+    if (renderer) {
+      renderer.shadowMap.needsUpdate = true;
+    }
   }, [funnelStage, activeFloorId, activeRoomId, floors, waypoints, modelUrl, triggerRoomDive]);
 
   // 3. Load & Auto-Center .GLB Model + Extract Floors & Rooms + Fast Hit-Boxes
@@ -833,6 +854,18 @@ export default function StreetViewViewer({
           hitMesh.userData.floorId = f.id;
           floorHitBoxesGroupRef.current.add(hitMesh);
         });
+
+        // Anderson Mancini & Edan Kwan rule: Freeze static transforms of loaded model
+        model.traverse((c) => {
+          if (c.userData?.isDynamic) return;
+          c.updateMatrix();
+          c.updateMatrixWorld(true);
+          c.matrixAutoUpdate = false;
+        });
+
+        if (rendererRef.current) {
+          rendererRef.current.shadowMap.needsUpdate = true;
+        }
 
         onFunnelStageChange('exterior');
         setLoading({ active: false, progress: 100 });

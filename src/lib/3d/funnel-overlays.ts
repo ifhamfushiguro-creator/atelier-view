@@ -11,39 +11,56 @@ export interface LivingCityScene {
 }
 
 /**
+ * Module-level texture cache for PBR procedural textures.
+ * Prevents redundant canvas creation, duplicate GPU uploads, and VRAM thrashing.
+ */
+const textureCache = new Map<string, THREE.CanvasTexture>();
+
+function getCachedTexture(key: string, factory: () => THREE.CanvasTexture): THREE.CanvasTexture {
+  if (typeof document === 'undefined') return new THREE.CanvasTexture({} as HTMLCanvasElement);
+  let tex = textureCache.get(key);
+  if (!tex) {
+    tex = factory();
+    textureCache.set(key, tex);
+  }
+  return tex;
+}
+
+/**
  * Procedural Crisp Noon Architectural Sky Dome Texture.
  * Zenith: #38BDF8 -> Mid-sky: #93C5FD -> Horizon: #E0F2FE.
  */
 function createNoonSkyTexture(): THREE.CanvasTexture {
-  if (typeof document === 'undefined') return new THREE.CanvasTexture({} as HTMLCanvasElement);
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 512;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    const grad = ctx.createLinearGradient(0, 0, 0, 512);
-    grad.addColorStop(0.0, '#38BDF8'); // Bright azure zenith
-    grad.addColorStop(0.5, '#60A5FA'); // Mid-sky blue
-    grad.addColorStop(0.82, '#93C5FD'); // Light atmospheric layer
-    grad.addColorStop(0.95, '#DBEAFE'); // Soft horizon wash
-    grad.addColorStop(1.0, '#E0F2FE');  // Crisp hazy daylight horizon
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 512, 512);
+  return getCachedTexture('noon_sky', () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      const grad = ctx.createLinearGradient(0, 0, 0, 512);
+      grad.addColorStop(0.0, '#38BDF8'); // Bright azure zenith
+      grad.addColorStop(0.5, '#60A5FA'); // Mid-sky blue
+      grad.addColorStop(0.82, '#93C5FD'); // Light atmospheric layer
+      grad.addColorStop(0.95, '#DBEAFE'); // Soft horizon wash
+      grad.addColorStop(1.0, '#E0F2FE');  // Crisp hazy daylight horizon
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 512, 512);
 
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
-    for (let i = 0; i < 10; i++) {
-      const cx = (i * 97) % 512;
-      const cy = 280 + ((i * 41) % 130);
-      const rx = 110 + (i % 4) * 30;
-      const ry = 8 + (i % 3) * 4;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, rx, ry, 0.05, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+      for (let i = 0; i < 10; i++) {
+        const cx = (i * 97) % 512;
+        const cy = 280 + ((i * 41) % 130);
+        const rx = 110 + (i % 4) * 30;
+        const ry = 8 + (i % 3) * 4;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0.05, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  });
 }
 
 /**
@@ -51,40 +68,41 @@ function createNoonSkyTexture(): THREE.CanvasTexture {
  * High-resolution multi-frequency turf with micro-blades, sunlight flecks, and anisotropy = 16.
  */
 function createTurfTexture(): THREE.CanvasTexture {
-  if (typeof document === 'undefined') return new THREE.CanvasTexture({} as HTMLCanvasElement);
-  const canvas = document.createElement('canvas');
-  canvas.width = 2048;
-  canvas.height = 2048;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.fillStyle = '#2B5B2E';
-    ctx.fillRect(0, 0, 2048, 2048);
+  return getCachedTexture('turf_pbr', () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 2048;
+    canvas.height = 2048;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#2B5B2E';
+      ctx.fillRect(0, 0, 2048, 2048);
 
-    for (let i = 0; i < 6000; i++) {
-      const x = (i * 353) % 2048;
-      const y = (i * 479) % 2048;
-      const r = 3 + (i % 5);
-      ctx.fillStyle = (i % 3 === 0) ? '#38723B' : (i % 3 === 1) ? '#488F4C' : '#1E4422';
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
+      for (let i = 0; i < 6000; i++) {
+        const x = (i * 353) % 2048;
+        const y = (i * 479) % 2048;
+        const r = 3 + (i % 5);
+        ctx.fillStyle = (i % 3 === 0) ? '#38723B' : (i % 3 === 1) ? '#488F4C' : '#1E4422';
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
-    ctx.fillStyle = 'rgba(100, 190, 90, 0.12)';
-    for (let i = 0; i < 800; i++) {
-      const x = (i * 701) % 2048;
-      const y = (i * 911) % 2048;
-      ctx.fillRect(x, y, 14, 8);
+      ctx.fillStyle = 'rgba(100, 190, 90, 0.12)';
+      for (let i = 0; i < 800; i++) {
+        const x = (i * 701) % 2048;
+        const y = (i * 911) % 2048;
+        ctx.fillRect(x, y, 14, 8);
+      }
     }
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(4, 4);
-  tex.anisotropy = 16;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  return tex;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(4, 4);
+    tex.anisotropy = 16;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    return tex;
+  });
 }
 
 /**
@@ -92,40 +110,41 @@ function createTurfTexture(): THREE.CanvasTexture {
  * Ashlar stone slabs with recessed mortar joints and travertine mineral flecks.
  */
 function createStonePatioTexture(): THREE.CanvasTexture {
-  if (typeof document === 'undefined') return new THREE.CanvasTexture({} as HTMLCanvasElement);
-  const canvas = document.createElement('canvas');
-  canvas.width = 2048;
-  canvas.height = 2048;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.fillStyle = '#E5DFD7';
-    ctx.fillRect(0, 0, 2048, 2048);
+  return getCachedTexture('stone_patio_pbr', () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 2048;
+    canvas.height = 2048;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#E5DFD7';
+      ctx.fillRect(0, 0, 2048, 2048);
 
-    ctx.strokeStyle = '#B3ACA1';
-    ctx.lineWidth = 6;
-    for (let y = 0; y <= 2048; y += 256) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(2048, y); ctx.stroke();
-      const offset = (y / 256) % 2 === 0 ? 0 : 192;
-      for (let x = offset; x <= 2048; x += 384) {
-        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 256); ctx.stroke();
+      ctx.strokeStyle = '#B3ACA1';
+      ctx.lineWidth = 6;
+      for (let y = 0; y <= 2048; y += 256) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(2048, y); ctx.stroke();
+        const offset = (y / 256) % 2 === 0 ? 0 : 192;
+        for (let x = offset; x <= 2048; x += 384) {
+          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 256); ctx.stroke();
+        }
+      }
+
+      for (let i = 0; i < 4000; i++) {
+        const x = (i * 521) % 2048;
+        const y = (i * 617) % 2048;
+        ctx.fillStyle = (i % 2 === 0) ? 'rgba(170, 160, 150, 0.18)' : 'rgba(255, 255, 255, 0.22)';
+        ctx.fillRect(x, y, 6, 4);
       }
     }
-
-    for (let i = 0; i < 4000; i++) {
-      const x = (i * 521) % 2048;
-      const y = (i * 617) % 2048;
-      ctx.fillStyle = (i % 2 === 0) ? 'rgba(170, 160, 150, 0.18)' : 'rgba(255, 255, 255, 0.22)';
-      ctx.fillRect(x, y, 6, 4);
-    }
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(3, 3);
-  tex.anisotropy = 16;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  return tex;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(3, 3);
+    tex.anisotropy = 16;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    return tex;
+  });
 }
 
 /**
@@ -133,30 +152,31 @@ function createStonePatioTexture(): THREE.CanvasTexture {
  * Dark-slate asphalt with multi-frequency aggregate quartz flecks and tire wear lanes.
  */
 function createPbrAsphaltTexture(): THREE.CanvasTexture {
-  if (typeof document === 'undefined') return new THREE.CanvasTexture({} as HTMLCanvasElement);
-  const canvas = document.createElement('canvas');
-  canvas.width = 2048;
-  canvas.height = 2048;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.fillStyle = '#22262E';
-    ctx.fillRect(0, 0, 2048, 2048);
+  return getCachedTexture('asphalt_pbr', () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 2048;
+    canvas.height = 2048;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#22262E';
+      ctx.fillRect(0, 0, 2048, 2048);
 
-    for (let i = 0; i < 8000; i++) {
-      const x = (i * 379) % 2048;
-      const y = (i * 563) % 2048;
-      ctx.fillStyle = (i % 4 === 0) ? '#373D49' : (i % 4 === 1) ? '#181A20' : (i % 4 === 2) ? '#2B303A' : '#454C5B';
-      ctx.fillRect(x, y, 4, 4);
+      for (let i = 0; i < 8000; i++) {
+        const x = (i * 379) % 2048;
+        const y = (i * 563) % 2048;
+        ctx.fillStyle = (i % 4 === 0) ? '#373D49' : (i % 4 === 1) ? '#181A20' : (i % 4 === 2) ? '#2B303A' : '#454C5B';
+        ctx.fillRect(x, y, 4, 4);
+      }
     }
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(12, 12);
-  tex.anisotropy = 16;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  return tex;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(12, 12);
+    tex.anisotropy = 16;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    return tex;
+  });
 }
 
 /**
@@ -164,39 +184,40 @@ function createPbrAsphaltTexture(): THREE.CanvasTexture {
  * Ashlar paving slabs with expansion joints and micro-grain broom finish.
  */
 function createPbrSidewalkTexture(): THREE.CanvasTexture {
-  if (typeof document === 'undefined') return new THREE.CanvasTexture({} as HTMLCanvasElement);
-  const canvas = document.createElement('canvas');
-  canvas.width = 2048;
-  canvas.height = 2048;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.fillStyle = '#D6D1C7';
-    ctx.fillRect(0, 0, 2048, 2048);
+  return getCachedTexture('sidewalk_pbr', () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 2048;
+    canvas.height = 2048;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#D6D1C7';
+      ctx.fillRect(0, 0, 2048, 2048);
 
-    ctx.strokeStyle = '#A8A297';
-    ctx.lineWidth = 8;
-    for (let y = 0; y <= 2048; y += 512) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(2048, y); ctx.stroke();
-    }
-    for (let x = 0; x <= 2048; x += 512) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 2048); ctx.stroke();
-    }
+      ctx.strokeStyle = '#A8A297';
+      ctx.lineWidth = 8;
+      for (let y = 0; y <= 2048; y += 512) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(2048, y); ctx.stroke();
+      }
+      for (let x = 0; x <= 2048; x += 512) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 2048); ctx.stroke();
+      }
 
-    for (let i = 0; i < 5000; i++) {
-      const x = (i * 419) % 2048;
-      const y = (i * 733) % 2048;
-      ctx.fillStyle = (i % 2 === 0) ? 'rgba(140, 134, 125, 0.12)' : 'rgba(255, 255, 255, 0.18)';
-      ctx.fillRect(x, y, 6, 6);
+      for (let i = 0; i < 5000; i++) {
+        const x = (i * 419) % 2048;
+        const y = (i * 733) % 2048;
+        ctx.fillStyle = (i % 2 === 0) ? 'rgba(140, 134, 125, 0.12)' : 'rgba(255, 255, 255, 0.18)';
+        ctx.fillRect(x, y, 6, 6);
+      }
     }
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(6, 6);
-  tex.anisotropy = 16;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  return tex;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(6, 6);
+    tex.anisotropy = 16;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    return tex;
+  });
 }
 
 /**
@@ -204,12 +225,12 @@ function createPbrSidewalkTexture(): THREE.CanvasTexture {
  * Features realistic stone panels, window mullions, and sky gradient reflections.
  */
 function createFacadeTexture(type: 'cream' | 'concrete' | 'terracotta' | 'glass'): THREE.CanvasTexture {
-  if (typeof document === 'undefined') return new THREE.CanvasTexture({} as HTMLCanvasElement);
-  const canvas = document.createElement('canvas');
-  canvas.width = 2048;
-  canvas.height = 2048;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return new THREE.CanvasTexture(canvas);
+  return getCachedTexture('facade_' + type, () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 2048;
+    canvas.height = 2048;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return new THREE.CanvasTexture(canvas);
 
   if (type === 'cream') {
     // Warm French travertine limestone (#EAE3D5)
@@ -325,25 +346,26 @@ function createFacadeTexture(type: 'cream' | 'concrete' | 'terracotta' | 'glass'
     }
   }
 
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = 16;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  return tex;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = 16;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    return tex;
+  });
 }
 
 /**
  * 2048x2048 Matching Procedural Bump Map for Facade Materials.
  */
 function createFacadeBumpMap(type: 'cream' | 'concrete' | 'terracotta' | 'glass'): THREE.CanvasTexture {
-  if (typeof document === 'undefined') return new THREE.CanvasTexture({} as HTMLCanvasElement);
-  const canvas = document.createElement('canvas');
-  canvas.width = 2048;
-  canvas.height = 2048;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return new THREE.CanvasTexture(canvas);
+  return getCachedTexture('facade_bump_' + type, () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 2048;
+    canvas.height = 2048;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return new THREE.CanvasTexture(canvas);
 
   ctx.fillStyle = '#808080';
   ctx.fillRect(0, 0, 2048, 2048);
@@ -413,65 +435,68 @@ function createFacadeBumpMap(type: 'cream' | 'concrete' | 'terracotta' | 'glass'
   tex.anisotropy = 16;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   return tex;
+  });
 }
 
 /**
  * 1024x1024 Procedural Tree Bark Texture (#4A3525).
  */
 function createBarkTexture(): THREE.CanvasTexture {
-  if (typeof document === 'undefined') return new THREE.CanvasTexture({} as HTMLCanvasElement);
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1024;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.fillStyle = '#4A3525';
-    ctx.fillRect(0, 0, 1024, 1024);
+  return getCachedTexture('bark_pbr', () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#4A3525';
+      ctx.fillRect(0, 0, 1024, 1024);
 
-    for (let i = 0; i < 2000; i++) {
-      const x = (i * 127) % 1024;
-      const y = (i * 389) % 1024;
-      ctx.fillStyle = (i % 2 === 0) ? '#38271A' : '#5A4230';
-      ctx.fillRect(x, y, 3, 28);
+      for (let i = 0; i < 2000; i++) {
+        const x = (i * 127) % 1024;
+        const y = (i * 389) % 1024;
+        ctx.fillStyle = (i % 2 === 0) ? '#38271A' : '#5A4230';
+        ctx.fillRect(x, y, 3, 28);
+      }
     }
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(2, 4);
-  return tex;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(2, 4);
+    return tex;
+  });
 }
 
 /**
  * 1024x1024 Procedural Botanical Foliage Canopy Texture.
  */
 function createFoliageTexture(): THREE.CanvasTexture {
-  if (typeof document === 'undefined') return new THREE.CanvasTexture({} as HTMLCanvasElement);
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1024;
-  const ctx = canvas.getContext('2d');
-  if (ctx) {
-    ctx.fillStyle = '#1E4D2B';
-    ctx.fillRect(0, 0, 1024, 1024);
+  return getCachedTexture('foliage_pbr', () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#1E4D2B';
+      ctx.fillRect(0, 0, 1024, 1024);
 
-    for (let i = 0; i < 3500; i++) {
-      const x = (i * 241) % 1024;
-      const y = (i * 397) % 1024;
-      const r = 4 + (i % 6);
-      ctx.fillStyle = (i % 4 === 0) ? '#2D6A32' : (i % 4 === 1) ? '#3E8E41' : (i % 4 === 2) ? '#58B35C' : '#EAB308';
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
+      for (let i = 0; i < 3500; i++) {
+        const x = (i * 241) % 1024;
+        const y = (i * 397) % 1024;
+        const r = 4 + (i % 6);
+        ctx.fillStyle = (i % 4 === 0) ? '#2D6A32' : (i % 4 === 1) ? '#3E8E41' : (i % 4 === 2) ? '#58B35C' : '#EAB308';
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(4, 4);
-  return tex;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(4, 4);
+    return tex;
+  });
 }
 
 /**
@@ -574,6 +599,22 @@ function createArchitecturalTreeGeometries(): { trunkGeo: THREE.BufferGeometry; 
   const crownGeo = BufferGeometryUtils.mergeGeometries(crownParts);
   crownGeo.computeVertexNormals();
 
+  // Anderson Mancini & Lusion rule: Pre-bake vertex-color ambient occlusion into crown geometry
+  const posAttr = crownGeo.attributes.position;
+  const colors = new Float32Array(posAttr.count * 3);
+  const darkAO = new THREE.Color(0x14361D); // deep canopy interior shade
+  const lightAO = new THREE.Color(0x72C464); // sunlit canopy exterior highlight
+  const tempCol = new THREE.Color();
+  for (let i = 0; i < posAttr.count; i++) {
+    const y = posAttr.getY(i);
+    const t = THREE.MathUtils.clamp((y - 2.4) / 3.0, 0, 1);
+    tempCol.copy(darkAO).lerp(lightAO, t);
+    colors[i * 3] = tempCol.r;
+    colors[i * 3 + 1] = tempCol.g;
+    colors[i * 3 + 2] = tempCol.b;
+  }
+  crownGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
   return { trunkGeo, crownGeo };
 }
 
@@ -614,12 +655,12 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
   const bCenter = modelBounds?.center || new THREE.Vector3(0, 0, 0);
 
   // 1. PDF Page 9 Three-Light Setup:
-  // Sun: Warm natural sunlight #ffefd7, intensity 2.2 at [22, 36, 18], 1024x1024 shadow map
+  // Sun: Warm natural sunlight #ffefd7, intensity 2.2 at [22, 36, 18], 2048x2048 shadow map
   const sunLight = new THREE.DirectionalLight(0xffefd7, 2.2);
   sunLight.position.set(22, 36, 18);
   sunLight.castShadow = true;
-  sunLight.shadow.mapSize.width = 1024;
-  sunLight.shadow.mapSize.height = 1024;
+  sunLight.shadow.mapSize.width = 2048;
+  sunLight.shadow.mapSize.height = 2048;
   sunLight.shadow.camera.near = 0.5;
   sunLight.shadow.camera.far = 160;
   sunLight.shadow.camera.left = -40;
@@ -657,6 +698,7 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
     opacity: 0.85
   });
   const cloudInstMesh = new THREE.InstancedMesh(cloudGeo, cloudMat, cloudCount);
+  cloudInstMesh.userData.isDynamic = true;
   const cloudPositions: THREE.Vector3[] = [];
   const dummy = new THREE.Object3D();
 
@@ -1065,6 +1107,7 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
 
   const crownMat = new THREE.MeshStandardMaterial({
     map: foliageTex,
+    vertexColors: true,
     roughness: 0.72,
     metalness: 0.05,
     flatShading: false
@@ -1126,6 +1169,8 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
   trunkInst.instanceMatrix.needsUpdate = true;
   crownInst.instanceMatrix.needsUpdate = true;
   if (crownInst.instanceColor) crownInst.instanceColor.needsUpdate = true;
+  trunkInst.matrixAutoUpdate = false;
+  crownInst.matrixAutoUpdate = false;
   group.add(trunkInst, crownInst);
 
   // 7. STRAIGHT-LINE GTA TRAFFIC SYSTEM
@@ -1255,6 +1300,8 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
       v.group.position.set(initPos, 0, cfg.laneCoord);
     }
     v.group.rotation.set(0, cfg.rotY, 0);
+    v.group.userData.isDynamic = true;
+    v.group.traverse((c) => { c.userData.isDynamic = true; });
     vehiclesGroup.add(v.group);
 
     straightVehicles.push({
@@ -1353,6 +1400,8 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
       root.position.set(cfg.laneCoord, 0, initPos);
     }
     root.rotation.set(0, cfg.rotY, 0);
+    root.userData.isDynamic = true;
+    root.traverse((c) => { c.userData.isDynamic = true; });
     pedsGroup.add(root);
 
     straightPedestrians.push({
@@ -1369,7 +1418,17 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
       walkPhase: i * 1.5
     });
   }
+  pedsGroup.userData.isDynamic = true;
   group.add(pedsGroup);
+
+  // Anderson Mancini & Lusion rule: Freeze all static meshes in city (terrain, buildings, trees, street fixtures)
+  group.traverse((obj) => {
+    if (!obj.userData?.isDynamic) {
+      obj.updateMatrix();
+      obj.updateMatrixWorld(true);
+      obj.matrixAutoUpdate = false;
+    }
+  });
 
   return {
     group,
