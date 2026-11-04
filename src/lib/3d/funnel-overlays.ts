@@ -539,76 +539,47 @@ function createArchitecturalTreeGeometries(): { trunkGeo: THREE.BufferGeometry; 
   const trunkGeo = BufferGeometryUtils.mergeGeometries(trunkParts);
   trunkGeo.computeVertexNormals();
 
-  // 2. Lush 36-Cluster Botanical Canopy (Smooth-shaded SphereGeometry, zero flat golf balls!)
+  // 2. Realistic Multi-Tier Architectural Shade Tree Boughs (Wide flattened organic layers, zero bumpy broccoli!)
   const crownParts: THREE.BufferGeometry[] = [];
-  const clusterCoords: Array<[number, number, number, number]> = [
-    // Core center puffs (y = 3.2 to 4.8)
-    [0.0, 3.6, 0.0, 1.30],
-    [0.0, 4.3, 0.0, 1.15],
-    [0.0, 4.9, 0.0, 0.95],
-    [0.3, 3.9, 0.3, 1.10],
-    [-0.3, 3.9, -0.3, 1.10],
-    [-0.3, 4.0, 0.3, 1.05],
-    [0.3, 4.0, -0.3, 1.05],
-    [0.0, 3.2, 0.4, 1.00],
-
-    // Mid-tier perimeter puffs (16 clusters radiating around trunk limbs)
-    [1.1, 3.4, 0.0, 1.05],
-    [-1.1, 3.4, 0.0, 1.05],
-    [0.0, 3.4, 1.1, 1.05],
-    [0.0, 3.4, -1.1, 1.05],
-    [0.85, 3.5, 0.85, 0.95],
-    [-0.85, 3.5, 0.85, 0.95],
-    [0.85, 3.5, -0.85, 0.95],
-    [-0.85, 3.5, -0.85, 0.95],
-    [1.35, 3.1, 0.4, 0.85],
-    [-1.35, 3.1, 0.4, 0.85],
-    [0.4, 3.1, 1.35, 0.85],
-    [0.4, 3.1, -1.35, 0.85],
-    [-0.4, 3.1, 1.35, 0.85],
-    [-0.4, 3.1, -1.35, 0.85],
-    [1.1, 3.8, 0.5, 0.90],
-    [-1.1, 3.8, 0.5, 0.90],
-
-    // Upper crown & branch-tip canopy puffs (12 clusters)
-    [0.6, 4.5, 0.3, 0.88],
-    [-0.6, 4.5, 0.3, 0.88],
-    [0.3, 4.5, 0.6, 0.88],
-    [-0.3, 4.5, -0.6, 0.88],
-    [0.7, 4.2, -0.6, 0.82],
-    [-0.7, 4.2, -0.6, 0.82],
-    [0.0, 5.3, 0.0, 0.78],
-    [0.35, 5.0, 0.2, 0.75],
-    [-0.35, 5.0, -0.2, 0.75],
-    [0.8, 2.8, 0.8, 0.72],
-    [-0.8, 2.8, 0.8, 0.72],
-    [0.8, 2.8, -0.8, 0.72]
+  const boughLayers = [
+    // Bottom spreading shade tier (broad horizontal boughs)
+    { pos: [0.0, 2.8, 0.0], scale: [2.6, 0.72, 2.4], rotY: 0.1 },
+    { pos: [0.65, 3.1, 0.45], scale: [1.85, 0.62, 1.75], rotY: 0.7 },
+    { pos: [-0.65, 3.2, -0.45], scale: [1.75, 0.62, 1.65], rotY: -0.6 },
+    // Mid tier
+    { pos: [0.35, 3.75, -0.35], scale: [2.15, 0.68, 2.05], rotY: 1.3 },
+    { pos: [-0.35, 4.15, 0.35], scale: [1.85, 0.65, 1.75], rotY: 2.1 },
+    // Upper apex layers
+    { pos: [0.0, 4.75, 0.0], scale: [1.55, 0.68, 1.45], rotY: 0.4 },
+    { pos: [0.1, 5.25, 0.0], scale: [1.15, 0.58, 1.05], rotY: -0.2 }
   ];
 
-  clusterCoords.forEach(([cx, cy, cz, radius], i) => {
-    const sGeo = new THREE.SphereGeometry(radius, 16, 12);
-    // Organic non-uniform scale jitter for natural leaf puff volume
-    const sx = 1.05 + (i % 4) * 0.06;
-    const sy = 0.88 + (i % 3) * 0.05;
-    const sz = 1.05 + (i % 5) * 0.05;
-    sGeo.scale(sx, sy, sz);
-    sGeo.translate(cx, cy, cz);
+  boughLayers.forEach((bough) => {
+    const sGeo = new THREE.SphereGeometry(1.0, 14, 10);
+    sGeo.scale(bough.scale[0], bough.scale[1], bough.scale[2]);
+    sGeo.rotateY(bough.rotY);
+    sGeo.translate(bough.pos[0], bough.pos[1], bough.pos[2]);
     crownParts.push(sGeo);
   });
 
   const crownGeo = BufferGeometryUtils.mergeGeometries(crownParts);
   crownGeo.computeVertexNormals();
 
-  // Anderson Mancini & Lusion rule: Pre-bake vertex-color ambient occlusion into crown geometry
+  // Smooth vertex-color ambient occlusion: deep forest green base to sunlit upper canopy
   const posAttr = crownGeo.attributes.position;
   const colors = new Float32Array(posAttr.count * 3);
-  const darkAO = new THREE.Color(0x14361D); // deep canopy interior shade
-  const lightAO = new THREE.Color(0x72C464); // sunlit canopy exterior highlight
+  const darkAO = new THREE.Color(0x1B3D20);
+  const midAO = new THREE.Color(0x2E6934);
+  const lightAO = new THREE.Color(0x489650);
   const tempCol = new THREE.Color();
   for (let i = 0; i < posAttr.count; i++) {
     const y = posAttr.getY(i);
-    const t = THREE.MathUtils.clamp((y - 2.4) / 3.0, 0, 1);
-    tempCol.copy(darkAO).lerp(lightAO, t);
+    const t = THREE.MathUtils.clamp((y - 2.1) / 3.4, 0, 1);
+    if (t < 0.5) {
+      tempCol.copy(darkAO).lerp(midAO, t * 2);
+    } else {
+      tempCol.copy(midAO).lerp(lightAO, (t - 0.5) * 2);
+    }
     colors[i * 3] = tempCol.r;
     colors[i * 3 + 1] = tempCol.g;
     colors[i * 3 + 2] = tempCol.b;
@@ -654,13 +625,14 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
   const bSize = modelBounds?.size || new THREE.Vector3(14, 4, 14);
   const bCenter = modelBounds?.center || new THREE.Vector3(0, 0, 0);
 
-  // 1. PDF Page 9 Three-Light Setup:
-  // Sun: Warm natural sunlight #ffefd7, intensity 2.2 at [22, 36, 18], 2048x2048 shadow map
-  const sunLight = new THREE.DirectionalLight(0xffefd7, 2.2);
+  // 1. PDF Page 9 Three-Light Setup (Calibrated Natural Warm Daylight):
+  // Sun: Warm natural sunlight #fff4e0, intensity 1.35 at [22, 36, 18], 2048x2048 shadow map
+  const sunLight = new THREE.DirectionalLight(0xfff4e0, 1.35);
   sunLight.position.set(22, 36, 18);
   sunLight.castShadow = true;
   sunLight.shadow.mapSize.width = 2048;
   sunLight.shadow.mapSize.height = 2048;
+  sunLight.shadow.autoUpdate = false;
   sunLight.shadow.camera.near = 0.5;
   sunLight.shadow.camera.far = 160;
   sunLight.shadow.camera.left = -40;
@@ -669,16 +641,16 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
   sunLight.shadow.camera.bottom = -40;
   sunLight.shadow.bias = -0.0005;
 
-  // Sky: Warm white sky #ffffff + sage ground #6b7c6e, intensity 1.15
-  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x6b7c6e, 1.15);
+  // Sky: Warm sky #d8ecff + olive ground #3a4a38, intensity 0.55
+  const hemiLight = new THREE.HemisphereLight(0xd8ecff, 0x3a4a38, 0.55);
   hemiLight.position.set(0, 60, 0);
 
-  // Fill: Cool sky-blue #93c5fd, intensity 0.55 at [-18, 20, -16]
-  const fillLight = new THREE.DirectionalLight(0x93c5fd, 0.55);
+  // Fill: Soft ambient sky fill #7da7d9, intensity 0.25 at [-18, 20, -16]
+  const fillLight = new THREE.DirectionalLight(0x7da7d9, 0.25);
   fillLight.position.set(-18, 20, -16);
   fillLight.castShadow = false;
 
-  group.add(sunLight, hemiLight, fillLight);
+  // Do not add duplicate lights to group so scene lighting is never double-stacked!
 
   // 2. Noon Sky Dome & Clouds
   const skyTex = createNoonSkyTexture();
@@ -719,7 +691,7 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
   // 3. CENTRAL PROPERTY PARCEL [-12m to +12m on X and Z]
   const turfTex = createTurfTexture();
   const lawnGeo = new THREE.BoxGeometry(24, 0.16, 24);
-  const lawnMat = new THREE.MeshStandardMaterial({ map: turfTex, color: 0x3b7a3e, roughness: 0.85 });
+  const lawnMat = new THREE.MeshStandardMaterial({ map: turfTex, color: 0x2e6631, roughness: 0.88, envMapIntensity: 0.2 });
   const lawnMesh = new THREE.Mesh(lawnGeo, lawnMat);
   lawnMesh.position.set(0, -0.08, 0);
   lawnMesh.receiveShadow = true;
@@ -728,7 +700,7 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
   // Paved Stone Entrance Driveway leading to South Sidewalk (Z = +12m)
   const patioTex = createStonePatioTexture();
   const drivewayGeo = new THREE.BoxGeometry(5.2, 0.18, 9.0);
-  const drivewayMat = new THREE.MeshStandardMaterial({ map: patioTex, color: 0xe2ddd5, roughness: 0.72 });
+  const drivewayMat = new THREE.MeshStandardMaterial({ map: patioTex, color: 0xc8c3ba, roughness: 0.85, envMapIntensity: 0.25 });
   const drivewayMesh = new THREE.Mesh(drivewayGeo, drivewayMat);
   drivewayMesh.position.set(0, -0.04, 7.5);
   drivewayMesh.receiveShadow = true;
@@ -1106,22 +1078,22 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
   trunkInst.castShadow = true;
 
   const crownMat = new THREE.MeshStandardMaterial({
-    map: foliageTex,
     vertexColors: true,
-    roughness: 0.72,
-    metalness: 0.05,
+    roughness: 0.85,
+    metalness: 0.0,
+    envMapIntensity: 0.15,
     flatShading: false
   });
   const crownInst = new THREE.InstancedMesh(crownGeo, crownMat, treeCount);
   crownInst.castShadow = true;
 
   const TREE_COLORS = [
-    new THREE.Color(0x1e4d2b), // Deep natural woodland green
-    new THREE.Color(0x2d6a32), // Rich daylight foliage green
-    new THREE.Color(0x3e8e41), // Vibrant foliage green
-    new THREE.Color(0x52a756), // Crisp bright apple green
-    new THREE.Color(0xea580c), // Blooming orange Gulmohar
-    new THREE.Color(0xf59e0b)  // Golden amber sunlit Gulmohar
+    new THREE.Color(0x234F28), // Deep forest green
+    new THREE.Color(0x2E6934), // Natural parkway green
+    new THREE.Color(0x38783E), // Olive architectural green
+    new THREE.Color(0x3F8244), // Sunlight foliage
+    new THREE.Color(0x26532C), // Woodland pine green
+    new THREE.Color(0x4D7C36)  // Olive golden green
   ];
 
   // Distribute trees along the four sidewalks and parkway verges
@@ -1152,7 +1124,7 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
 
   function setTreeTransform(idx: number, tx: number, ty: number, tz: number) {
     if (idx >= treeCount) return;
-    const scale = 0.85 + (idx % 4) * 0.12;
+    const scale = 0.9 + (idx % 4) * 0.1;
     dummy.position.set(tx, ty, tz);
     dummy.rotation.set(0, (idx * 1.3) % (Math.PI * 2), 0);
     dummy.scale.set(scale, scale, scale);
@@ -1161,8 +1133,7 @@ export function buildLivingCityScene(modelBounds?: { size: THREE.Vector3; center
     trunkInst.setMatrixAt(idx, dummy.matrix);
     crownInst.setMatrixAt(idx, dummy.matrix);
 
-    const isGulmohar = idx % 6 === 0;
-    const c = isGulmohar ? TREE_COLORS[4 + (idx % 2)] : TREE_COLORS[idx % 4];
+    const c = TREE_COLORS[idx % TREE_COLORS.length];
     crownInst.setColorAt(idx, c);
   }
 

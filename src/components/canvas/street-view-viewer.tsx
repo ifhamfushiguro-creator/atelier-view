@@ -32,7 +32,12 @@ function disposeMaterial(mat: THREE.Material | THREE.Material[] | undefined): vo
     if (!m) continue;
     for (const val of Object.values(m)) {
       if (val && typeof val === 'object' && 'isTexture' in val && (val as THREE.Texture).isTexture) {
-        (val as THREE.Texture).dispose();
+        const tex = val as THREE.Texture;
+        const sourceData = (tex.source as { data?: unknown } | undefined)?.data;
+        if (sourceData && typeof (sourceData as ImageBitmap).close === 'function') {
+          (sourceData as ImageBitmap).close();
+        }
+        tex.dispose();
       }
     }
     m.dispose();
@@ -114,6 +119,7 @@ export default function StreetViewViewer({
 
   const reticleCardRef = useRef<HTMLDivElement>(null);
   const roomTagRefs = useRef<{ [k: string]: HTMLButtonElement | null }>({});
+  const sunLightRef = useRef<THREE.DirectionalLight | null>(null);
 
   // Single model instance clipping planes
   const topClipPlane = useRef(new THREE.Plane(new THREE.Vector3(0, -1, 0), 100)).current;
@@ -263,13 +269,12 @@ export default function StreetViewViewer({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.toneMappingExposure = 0.86;
     renderer.localClippingEnabled = true;
 
-    // Anderson Mancini & Edan Kwan 120 FPS PBR Shadow Architecture:
-    // PCFSoftShadowMap enabled, but autoUpdate set to false so shadows re-render 0 times per frame!
+    // Utsubo Three.js r186 Performance: PCFShadowMap with autoUpdate = false for 0.00ms per-frame shadow rendering
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.shadowMap.autoUpdate = false;
     renderer.shadowMap.needsUpdate = true;
 
@@ -282,8 +287,8 @@ export default function StreetViewViewer({
     const roomEnv = new RoomEnvironment();
     scene.environment = pmremGenerator.fromScene(roomEnv, 0.04).texture;
 
-    // PDF Field Guide 3-Light Setup: Sun 2.0 (2048x2048 soft shadow map), Sky 1.1, Cool Fill 0.5
-    const sunLight = new THREE.DirectionalLight(0xffefd7, 2.0);
+    // Calibrated Natural Warm Daylight: Sun 1.35 (#fff4e0), Sky 0.55 (#d8ecff / #3a4a38), Fill 0.25 (#7da7d9)
+    const sunLight = new THREE.DirectionalLight(0xfff4e0, 1.35);
     sunLight.position.set(18, 28, 16);
     sunLight.castShadow = true;
     sunLight.shadow.mapSize.width = 2048;
@@ -291,10 +296,12 @@ export default function StreetViewViewer({
     sunLight.shadow.bias = -0.0001;
     sunLight.shadow.camera.near = 1;
     sunLight.shadow.camera.far = 80;
+    sunLight.shadow.autoUpdate = false;
+    sunLightRef.current = sunLight;
 
-    const skyLight = new THREE.HemisphereLight(0xfff8eb, 0x2b303a, 1.1);
+    const skyLight = new THREE.HemisphereLight(0xd8ecff, 0x3a4a38, 0.55);
 
-    const fillLight = new THREE.DirectionalLight(0x8ab4f8, 0.5);
+    const fillLight = new THREE.DirectionalLight(0x7da7d9, 0.25);
     fillLight.position.set(-18, 14, -16);
 
     // Soft Matte Architectural Ceiling Plane for Interior Room View
@@ -349,27 +356,15 @@ export default function StreetViewViewer({
     };
     window.addEventListener('resize', onResize);
 
-    let animId: number;
-    let isPaused = false;
-    const clock = new THREE.Clock();
+    // Utsubo Tip #100: Use THREE.Timer (connected to document) with renderer.setAnimationLoop
+    const timer = new THREE.Timer();
+    timer.connect(document);
     const collisionRay = new THREE.Raycaster();
 
-    const onVisibilityChange = () => {
-      if (document.hidden) {
-        isPaused = true;
-      } else {
-        isPaused = false;
-        clock.getDelta();
-        animId = requestAnimationFrame(animate);
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-
-    const animate = () => {
-      if (isPaused) return;
-      animId = requestAnimationFrame(animate);
-      const delta = Math.min(clock.getDelta(), 0.1);
-      const elapsed = clock.getElapsedTime();
+    const animate = (timestamp: number) => {
+      timer.update(timestamp);
+      const delta = Math.min(timer.getDelta(), 0.033);
+      const elapsed = timer.getElapsed();
       const cam = cameraRef.current;
       if (!cam) return;
 
@@ -559,11 +554,11 @@ export default function StreetViewViewer({
 
       renderer.render(scene, cam);
     };
-    animate();
+    renderer.setAnimationLoop(animate);
 
     return () => {
-      cancelAnimationFrame(animId);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
+      renderer.setAnimationLoop(null);
+      timer.dispose();
       cancelAnimationFrame(resizeRaf);
       window.removeEventListener('resize', onResize);
       clearAndDisposeGroup(floorHitBoxesGroupRef.current);
@@ -578,6 +573,7 @@ export default function StreetViewViewer({
         ceilingPlaneRef.current = null;
       }
       pmremGenerator.dispose();
+      sunLightRef.current = null;
       renderer.dispose();
       if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement);
     };
@@ -593,7 +589,7 @@ export default function StreetViewViewer({
 
     if (funnelStage === 'exterior') {
       scene.background = new THREE.Color(0x235796);
-      scene.fog = new THREE.FogExp2(0x235796, 0.0045);
+      scene.fog = new THREE.FogExp2(0x8ec5fc, 0.0007);
       if (livingCityRef.current) livingCityRef.current.group.visible = true;
       if (floorHighlightRef.current) floorHighlightRef.current.visible = false;
       if (ceilingPlaneRef.current) ceilingPlaneRef.current.visible = false;
@@ -718,7 +714,10 @@ export default function StreetViewViewer({
       }
     }
 
-    // Anderson Mancini rule: Trigger static shadow map re-render only upon stage change
+    // Utsubo Tip #61: Trigger static shadow map re-render only upon stage change
+    if (sunLightRef.current) {
+      sunLightRef.current.shadow.needsUpdate = true;
+    }
     if (renderer) {
       renderer.shadowMap.needsUpdate = true;
     }
@@ -758,7 +757,7 @@ export default function StreetViewViewer({
 
     loader.load(
       modelUrl,
-      (gltf) => {
+      async (gltf) => {
         const model = gltf.scene;
         if (modelUrl.includes('reconstructed_') || gltf.scene.userData?.isVideoReconstructed) {
           // SACRED 3D INVARIANT 2: 180° X-Axis flip for computer-vision reconstructed meshes
@@ -864,7 +863,16 @@ export default function StreetViewViewer({
         });
 
         if (rendererRef.current) {
+          if (sunLightRef.current) sunLightRef.current.shadow.needsUpdate = true;
           rendererRef.current.shadowMap.needsUpdate = true;
+          // Utsubo Tip #5: Pre-compile shaders asynchronously before hiding loading indicator
+          try {
+            if (sceneRef.current && cameraRef.current) {
+              await rendererRef.current.compileAsync(sceneRef.current, cameraRef.current);
+            }
+          } catch {
+            // WebGL context ready
+          }
         }
 
         onFunnelStageChange('exterior');
@@ -943,7 +951,11 @@ export default function StreetViewViewer({
           }
 
           if (targetFloor) {
-            setHoveredFloor(targetFloor);
+            // Utsubo Tip #63: Guard React state updates to avoid pointermove re-rendering
+            if (hoveredFloorRef.current?.id !== targetFloor.id) {
+              hoveredFloorRef.current = targetFloor;
+              setHoveredFloor(targetFloor);
+            }
 
             // Flush facade light ribbon highlight
             updateFloorStoryHighlight(
@@ -964,7 +976,10 @@ export default function StreetViewViewer({
             return;
           }
         } else if (!isDragging.current) {
-          setHoveredFloor(null);
+          if (hoveredFloorRef.current !== null) {
+            hoveredFloorRef.current = null;
+            setHoveredFloor(null);
+          }
           if (floorHighlightRef.current) floorHighlightRef.current.visible = false;
           if (reticleCardRef.current) reticleCardRef.current.style.display = 'none';
         }
