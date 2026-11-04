@@ -133,7 +133,7 @@ export async function extractMultiViewFramesFromVideo(
       const vh = video.videoHeight || 480;
 
       // Max 768px output canvas
-      const outScale = Math.min(1, 768 / Math.max(vw, vh));
+      const outScale = Math.min(1, 512 / Math.max(vw, vh));
       const outW = Math.round(vw * outScale);
       const outH = Math.round(vh * outScale);
       const outCanvas = document.createElement('canvas');
@@ -158,17 +158,15 @@ export async function extractMultiViewFramesFromVideo(
 
       const frames: string[] = [];
       const acceptedThumbs: number[][] = [];
-      const startTime = dur * 0.05;
-      const endTime = dur * 0.95;
-      const usableSpan = Math.max(0.1, endTime - startTime);
-      const bucketDur = usableSpan / count;
+      const targetPcts = [0.15, 0.38, 0.62, 0.85];
 
       for (let b = 0; b < count; b++) {
-        const bucketStart = startTime + b * bucketDur;
+        const centerPct = targetPcts[b % targetPcts.length];
+        const span = dur * 0.08;
         const candidateTimes = [
-          bucketStart + bucketDur * 0.2,
-          bucketStart + bucketDur * 0.5,
-          bucketStart + bucketDur * 0.8,
+          Math.max(0.05, dur * centerPct - span),
+          Math.max(0.05, dur * centerPct),
+          Math.min(dur - 0.05, dur * centerPct + span),
         ];
 
         let bestTime = candidateTimes[1];
@@ -220,8 +218,8 @@ export async function buildGlbFromVideo(
   videoFile: File | Blob,
   onProgress?: (stage: string, percent: number) => void
 ): Promise<ReconstructedGlbResult> {
-  onProgress?.('Extracting 8 multi-view walkthrough frames...', 20);
-  const framesBase64 = await extractMultiViewFramesFromVideo(videoFile, 8, onProgress);
+  onProgress?.('Extracting 4 multi-view walkthrough frames (MASt3R complete graph)...', 20);
+  const framesBase64 = await extractMultiViewFramesFromVideo(videoFile, 4, onProgress);
 
   onProgress?.('Connecting to Hugging Face ZeroGPU (naver/MASt3R)...', 55);
   const fileName = (videoFile as File).name || 'walkthrough_video';

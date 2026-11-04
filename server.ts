@@ -1,8 +1,14 @@
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
-import { Client, handle_file } from '@gradio/client';
+import {
+  reconstructVideoFrames,
+  sanitizeFileName,
+  pruneUploads,
+  type ReconstructResponse
+} from './src/lib/3d/video-reconstruction-service';
+
+export { reconstructVideoFrames, sanitizeFileName, pruneUploads, type ReconstructResponse };
 
 // Automatically load local .env if present
 try {
@@ -29,11 +35,6 @@ try {
   // Ignore env read issues
 }
 
-export interface ReconstructResponse {
-  modelUrl: string;
-  engine: string;
-  isVideoReconstructed: boolean;
-}
 
 export interface ProjectApproval {
   clientName: string;
@@ -78,199 +79,6 @@ export function saveProjectsDatabase(data: Record<string, StoredProject>): void 
   } catch (err) {
     console.error('Failed to persist projects database:', err);
     throw err;
-  }
-}
-
-const ALLOWED_UPLOAD_EXTS = new Set(['.glb', '.gltf', '.jpg', '.jpeg', '.png', '.webp', '.mp4']);
-
-export function sanitizeFileName(name: string, fallback = 'file'): string {
-  const base = path.basename(name || fallback);
-  const ext = path.extname(base).toLowerCase();
-  const safeExt = ALLOWED_UPLOAD_EXTS.has(ext) ? ext : '.glb';
-  const cleanBase = base.slice(0, base.length - ext.length).replace(/[^a-zA-Z0-9_-]/g, '_') || fallback;
-  return `${cleanBase}${safeExt}`;
-}
-
-export async function reconstructVideoFrames(
-  framesBase64: string[],
-  fileName: string = 'video_room'
-): Promise<ReconstructResponse> {
-  const hfToken = process.env.HF_TOKEN;
-  const uploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
-  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-
-  const tempFramePaths: string[] = [];
-  try {
-    for (let i = 0; i < framesBase64.length; i++) {
-      const clean = framesBase64[i].replace(/^data:image\/\w+;base64,/, '');
-      const buf = Buffer.from(clean, 'base64');
-      const tempPath = path.join(os.tmpdir(), `atelier_frame_${Date.now()}_${i}.jpg`);
-      fs.writeFileSync(tempPath, buf);
-      tempFramePaths.push(tempPath);
-    }
-    console.log(`[Video-to-3D] 1/4 Saved ${tempFramePaths.length} temp frames`);
-
-    const handledFiles = tempFramePaths.map((p) => handle_file(p));
-
-    const saveGlbFromPayload = async (
-      payloadUrlOrPath: string,
-      prefix: string
-    ): Promise<string> => {
-      let buf: Buffer;
-      if (/^https?:\/\//i.test(payloadUrlOrPath)) {
-        const res = await fetch(payloadUrlOrPath);
-        if (!res.ok) throw new Error(`Failed to download reconstructed GLB: ${res.statusText}`);
-        buf = Buffer.from(await res.arrayBuffer());
-      } else if (fs.existsSync(payloadUrlOrPath)) {
-        buf = fs.readFileSync(payloadUrlOrPath);
-      } else {
-        throw new Error(`Reconstructed GLB path or URL unreachable: ${payloadUrlOrPath}`);
-      }
-
-      if (buf.byteLength < 10240) {
-        throw new Error(`Reconstructed GLB file is invalid or too small (${buf.byteLength} bytes)`);
-      }
-
-      const safeName = sanitizeFileName(fileName, 'video_room');
-      const baseClean = safeName.replace(/\.[^.]+$/, '');
-      const outName = `reconstructed_${prefix}_${Date.now()}_${baseClean}.glb`;
-      const outPath = path.join(uploadsDir, outName);
-      fs.writeFileSync(outPath, buf);
-      pruneUploads(uploadsDir);
-
-      const mbSize = (buf.byteLength / (1024 * 1024)).toFixed(2);
-      console.log(`[Video-to-3D] 4/4 Saved real .glb (${mbSize} MB) -> /uploads/${outName}`);
-      return `/uploads/${outName}`;
-    };
-
-    const extractGlbReference = (outputData: unknown): string | null => {
-      if (!outputData) return null;
-      if (typeof outputData === 'string' && (outputData.includes('.glb') || /^https?:\/\//i.test(outputData))) {
-        return outputData;
-      }
-      if (Array.isArray(outputData)) {
-        for (const item of outputData) {
-          const found = extractGlbReference(item);
-          if (found) return found;
-        }
-      } else if (typeof outputData === 'object') {
-        const obj = outputData as Record<string, unknown>;
-        if (typeof obj.url === 'string') return obj.url;
-        if (typeof obj.path === 'string') return obj.path;
-        for (const val of Object.values(obj)) {
-          const found = extractGlbReference(val);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
-
-    // 1. Primary Engine: naver/MASt3R (Triangulated 3D Mesh GLB via TSDF surface extraction)
-    try {
-      console.log('[Video-to-3D] 2/4 Connected to HF Space (naver/MASt3R)');
-      const client = await Client.connect(
-        'naver/MASt3R',
-        hfToken ? { hf_token: hfToken as `hf_${string}` } : undefined
-      );
-
-      console.log('[Video-to-3D] 3/4 Running 3D mesh reconstruction...');
-      const result = await client.predict('/local_get_reconstructed_scene', [
-        handledFiles,
-        1.5,   // min_conf_thr
-        0,     // matching_conf_thr
-        false, // as_pointcloud = false (CRITICAL: solid 3D trimesh .glb)
-        0.001, // cam_size (hides camera frustum cones)
-        false  // shared_intrinsics
-      ]);
-
-      const glbRef = extractGlbReference(result?.data);
-      if (glbRef) {
-        const modelUrl = await saveGlbFromPayload(glbRef, 'mast3r');
-        return { modelUrl, engine: 'naver/MASt3R 3D Mesh', isVideoReconstructed: true };
-      }
-    } catch (err) {
-      console.warn('naver/MASt3R failed or busy, falling back to facebook/vggt:', err);
-    }
-
-    // 2. Secondary Engine: facebook/vggt (Meta AI VGGT-1B 3D GLB)
-    try {
-      console.log('[Video-to-3D] 2/4 Connected to HF Space (facebook/vggt)');
-      const vggt = await Client.connect(
-        'facebook/vggt',
-        hfToken ? { hf_token: hfToken as `hf_${string}` } : undefined
-      );
-
-      console.log('[Video-to-3D] 3/4 Running 3D mesh reconstruction...');
-      const uploadRes = await vggt.predict('/update_gallery_on_upload', [null, handledFiles]);
-      const targetDir = (uploadRes?.data as unknown[])?.[1] || 'sample';
-
-      const vggtRes = await vggt.predict('/gradio_demo', [
-        targetDir,
-        25.0,
-        'All',
-        false,
-        false,
-        false,
-        false,
-        'Depthmap and Camera Branch'
-      ]);
-
-      const vGlbRef = extractGlbReference(vggtRes?.data);
-      if (vGlbRef) {
-        const modelUrl = await saveGlbFromPayload(vGlbRef, 'vggt');
-        return { modelUrl, engine: 'facebook/vggt 3D', isVideoReconstructed: true };
-      }
-    } catch (err) {
-      console.warn('facebook/vggt failed:', err);
-    }
-
-    // 3. Fallback for offline/test environments: copy or use sample pavilion
-    const fallbackSample = path.join(uploadsDir, 'spatial_pavilion_1792412121444.glb');
-    if (fs.existsSync(fallbackSample)) {
-      const outName = `reconstructed_offline_${Date.now()}.glb`;
-      const outPath = path.join(uploadsDir, outName);
-      fs.copyFileSync(fallbackSample, outPath);
-      const stat = fs.statSync(outPath);
-      const mbSize = (stat.size / (1024 * 1024)).toFixed(2);
-      console.log(`[Video-to-3D] 4/4 Saved real .glb (${mbSize} MB) -> /uploads/${outName}`);
-      pruneUploads(uploadsDir);
-      return {
-        modelUrl: `/uploads/${outName}`,
-        engine: 'Architectural Mesh (Offline Fallback)',
-        isVideoReconstructed: true
-      };
-    }
-
-    throw new Error('All Hugging Face 3D ZeroGPU engines are busy. Please try again in 30 seconds.');
-  } finally {
-    for (const p of tempFramePaths) {
-      try {
-        if (fs.existsSync(p)) fs.unlinkSync(p);
-      } catch {
-        // Temp frame cleanup
-      }
-    }
-  }
-}
-
-function pruneUploads(dir: string, maxFiles = 20, maxAgeMs = 24 * 3600 * 1000): void {
-  try {
-    const now = Date.now();
-    const files = fs.readdirSync(dir)
-      .filter((f) => f.startsWith('reconstructed_') && f.endsWith('.glb'))
-      .map((f) => {
-        const fullPath = path.join(dir, f);
-        return { path: fullPath, mtime: fs.statSync(fullPath).mtimeMs };
-      })
-      .sort((a, b) => b.mtime - a.mtime);
-
-    files.forEach((file, index) => {
-      if (index >= maxFiles || (now - file.mtime) > maxAgeMs) {
-        fs.unlinkSync(file.path);
-      }
-    });
-  } catch {
-    // Non-critical background disk cleanup
   }
 }
 
@@ -327,7 +135,8 @@ app.post('/api/3d/reconstruct-video', async (req, res) => {
     return res.json(result);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Reconstruction failed';
-    return res.status(500).json({ error: msg });
+    const status = (msg.includes('Cloud 3D GPU failed') || msg.includes('Hugging Face')) ? 502 : 500;
+    return res.status(status).json({ error: msg });
   }
 });
 
