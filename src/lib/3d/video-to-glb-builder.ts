@@ -5,13 +5,23 @@ export interface ReconstructedGlbResult {
   engine?: string;
 }
 
-function computeSharpness(ctx: CanvasRenderingContext2D, w: number, h: number): number {
+interface FrameStats {
+  sharpness: number;
+  brightness: number;
+  thumb: number[];
+}
+
+function analyzeCanvasFrame(ctx: CanvasRenderingContext2D, w: number, h: number): FrameStats {
   const imgData = ctx.getImageData?.(0, 0, w, h);
-  if (!imgData) return 1;
+  if (!imgData) return { sharpness: 1, brightness: 128, thumb: new Array(64).fill(128) };
   const d = imgData.data;
+
   let sum = 0;
   let sumSq = 0;
   let count = 0;
+  let totalLum = 0;
+  let lumCount = 0;
+
   for (let y = 1; y < h - 1; y += 2) {
     const row = y * w;
     const prev = (y - 1) * w;
@@ -27,9 +37,36 @@ function computeSharpness(ctx: CanvasRenderingContext2D, w: number, h: number): 
       sum += lap;
       sumSq += lap * lap;
       count++;
+      totalLum += c;
+      lumCount++;
     }
   }
-  return count > 0 ? sumSq / count - (sum / count) ** 2 : 1;
+
+  const sharpness = count > 0 ? sumSq / count - (sum / count) ** 2 : 1;
+  const brightness = lumCount > 0 ? totalLum / lumCount : 128;
+
+  const thumb: number[] = new Array(64).fill(0);
+  const cellW = w / 8;
+  const cellH = h / 8;
+  for (let gy = 0; gy < 8; gy++) {
+    const py = Math.min(h - 1, Math.floor((gy + 0.5) * cellH));
+    const row = py * w;
+    for (let gx = 0; gx < 8; gx++) {
+      const px = Math.min(w - 1, Math.floor((gx + 0.5) * cellW));
+      const idx = (row + px) * 4;
+      thumb[gy * 8 + gx] = Math.round(d[idx] * 0.299 + d[idx + 1] * 0.587 + d[idx + 2] * 0.114);
+    }
+  }
+
+  return { sharpness, brightness, thumb };
+}
+
+function isDuplicateFrame(thumbA: number[], thumbB: number[], threshold = 14): boolean {
+  let diff = 0;
+  for (let i = 0; i < 64; i++) {
+    diff += Math.abs(thumbA[i] - thumbB[i]);
+  }
+  return diff / 64 < threshold;
 }
 
 export function generateSampleFramesBase64(count = 8): string[] {
@@ -82,7 +119,7 @@ export async function extractMultiViewFramesFromVideo(
     const timeout = setTimeout(() => {
       cleanup();
       resolve(generateSampleFramesBase64(count));
-    }, 10000);
+    }, 15000);
 
     video.onerror = () => {
       clearTimeout(timeout);
@@ -95,8 +132,8 @@ export async function extractMultiViewFramesFromVideo(
       const vw = video.videoWidth || 640;
       const vh = video.videoHeight || 480;
 
-      // Max 1024px output canvas
-      const outScale = Math.min(1, 1024 / Math.max(vw, vh));
+      // Max 768px output canvas
+      const outScale = Math.min(1, 768 / Math.max(vw, vh));
       const outW = Math.round(vw * outScale);
       const outH = Math.round(vh * outScale);
       const outCanvas = document.createElement('canvas');
@@ -120,27 +157,41 @@ export async function extractMultiViewFramesFromVideo(
         });
 
       const frames: string[] = [];
-      const bucketDur = dur / count;
+      const acceptedThumbs: number[][] = [];
+      const startTime = dur * 0.05;
+      const endTime = dur * 0.95;
+      const usableSpan = Math.max(0.1, endTime - startTime);
+      const bucketDur = usableSpan / count;
 
       for (let b = 0; b < count; b++) {
-        const bucketStart = b * bucketDur;
+        const bucketStart = startTime + b * bucketDur;
         const candidateTimes = [
-          bucketStart + bucketDur * 0.25,
+          bucketStart + bucketDur * 0.2,
           bucketStart + bucketDur * 0.5,
-          bucketStart + bucketDur * 0.75,
+          bucketStart + bucketDur * 0.8,
         ];
 
-        let bestTime = candidateTimes[0];
+        let bestTime = candidateTimes[1];
         let bestScore = -1;
+        let chosenThumb: number[] | null = null;
 
         for (const t of candidateTimes) {
           await seek(t);
           if (scoreCtx) {
             scoreCtx.drawImage(video, 0, 0, scoreW, scoreH);
-            const score = computeSharpness(scoreCtx, scoreW, scoreH);
-            if (score > bestScore) {
-              bestScore = score;
+            const { sharpness, brightness, thumb } = analyzeCanvasFrame(scoreCtx, scoreW, scoreH);
+
+            // Skip pitch-black (<20) or blown-out white (>240)
+            if (brightness < 20 || brightness > 240) continue;
+
+            // Skip duplicate frames against previously accepted frames
+            const isDuplicate = acceptedThumbs.some((prev) => isDuplicateFrame(prev, thumb));
+            const effectiveScore = isDuplicate ? sharpness * 0.35 : sharpness;
+
+            if (effectiveScore > bestScore) {
+              bestScore = effectiveScore;
               bestTime = t;
+              chosenThumb = thumb;
             }
           }
         }
@@ -152,6 +203,7 @@ export async function extractMultiViewFramesFromVideo(
         if (outCtx) {
           outCtx.drawImage(video, 0, 0, outW, outH);
           frames.push(outCanvas.toDataURL('image/jpeg', 0.85));
+          if (chosenThumb) acceptedThumbs.push(chosenThumb);
         }
 
         onProgress?.(`Sampling sharp view ${b + 1} of ${count}...`, 15 + Math.round(((b + 1) / count) * 40));

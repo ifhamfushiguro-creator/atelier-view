@@ -1,7 +1,33 @@
 import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Client } from '@gradio/client';
+import os from 'node:os';
+import { Client, handle_file } from '@gradio/client';
+
+// Automatically load local .env if present
+try {
+  const envPath = path.resolve(process.cwd(), '.env');
+  if (fs.existsSync(envPath)) {
+    const envContent = fs.readFileSync(envPath, 'utf-8');
+    envContent.split(/\r?\n/).forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx > 0) {
+        const key = trimmed.slice(0, eqIdx).trim();
+        let val = trimmed.slice(eqIdx + 1).trim();
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.slice(1, -1);
+        }
+        if (!process.env[key]) {
+          process.env[key] = val;
+        }
+      }
+    });
+  }
+} catch {
+  // Ignore env read issues
+}
 
 export interface ReconstructResponse {
   modelUrl: string;
@@ -73,97 +99,158 @@ export async function reconstructVideoFrames(
   const uploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
-  const frameBlobs = framesBase64.map((b64) => {
-    const clean = b64.replace(/^data:image\/\w+;base64,/, '');
-    return new Blob([Buffer.from(clean, 'base64')], { type: 'image/jpeg' });
-  });
-
-  const saveGlbFromUrl = async (remoteUrl: string, prefix: string): Promise<string> => {
-    const res = await fetch(remoteUrl);
-    if (!res.ok) throw new Error(`Failed to download reconstructed GLB: ${res.statusText}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const safeName = sanitizeFileName(fileName, 'video_room');
-    const baseClean = safeName.replace(/\.[^.]+$/, '');
-    const outName = `reconstructed_${prefix}_${Date.now()}_${baseClean}.glb`;
-    fs.writeFileSync(path.join(uploadsDir, outName), buf);
-    pruneUploads(uploadsDir);
-    return `/uploads/${outName}`;
-  };
-
-  // 1. Primary Engine: naver/MASt3R (Triangulated 3D Mesh GLB via TSDF surface extraction)
+  const tempFramePaths: string[] = [];
   try {
-    const client = await Client.connect('naver/MASt3R', hfToken ? { hf_token: hfToken as `hf_${string}` } : undefined);
-    const result = await client.predict(0, [
-      frameBlobs,
-      'refine+depth', // optim_level
-      0.07,           // lr1
-      200,            // niter1
-      0.01,           // lr2
-      200,            // niter2
-      1.5,            // min_conf_thr
-      2.0,            // matching_conf_thr
-      false,          // as_pointcloud = false (CRITICAL: forces solid 3D trimesh .glb)
-      false,          // mask_sky
-      true,           // clean_depth
-      true,           // transparent_cams
-      0.001,          // cam_size
-      'swin',         // scenegraph_type
-      3,              // winsize
-      false,          // win_cyclic
-      0,              // refid
-      0.03,           // TSDF_thresh
-      true            // shared_intrinsics
-    ]);
-
-    const data = result.data as Array<{ url?: string; path?: string } | string>;
-    const glbUrl = (data[1] && typeof data[1] === 'object' ? data[1].url : null) ||
-                   (data[0] && typeof data[0] === 'object' ? data[0].url : null) ||
-                   (typeof data[0] === 'string' ? data[0] : null);
-
-    if (glbUrl) {
-      const modelUrl = await saveGlbFromUrl(glbUrl, 'mast3r');
-      return { modelUrl, engine: 'naver/MASt3R 3D Mesh', isVideoReconstructed: true };
+    for (let i = 0; i < framesBase64.length; i++) {
+      const clean = framesBase64[i].replace(/^data:image\/\w+;base64,/, '');
+      const buf = Buffer.from(clean, 'base64');
+      const tempPath = path.join(os.tmpdir(), `atelier_frame_${Date.now()}_${i}.jpg`);
+      fs.writeFileSync(tempPath, buf);
+      tempFramePaths.push(tempPath);
     }
-  } catch (err) {
-    console.warn('naver/MASt3R failed or busy, falling back to facebook/vggt:', err);
-  }
+    console.log(`[Video-to-3D] 1/4 Saved ${tempFramePaths.length} temp frames`);
 
-  // 2. Secondary Engine: facebook/vggt (Meta AI VGGT-1B 3D GLB)
-  try {
-    const vggt = await Client.connect('facebook/vggt', hfToken ? { hf_token: hfToken as `hf_${string}` } : undefined);
-    await vggt.predict('/update_gallery_on_upload', [null, frameBlobs]);
-    const vggtRes = await vggt.predict('/gradio_demo', [
-      25.0,
-      'All',
-      false,
-      false,
-      false,
-      false,
-      'Depthmap and Camera Branch'
-    ]);
+    const handledFiles = tempFramePaths.map((p) => handle_file(p));
 
-    const vData = vggtRes.data as Array<{ url?: string; path?: string } | string>;
-    const vGlbUrl = (vData[0] && typeof vData[0] === 'object' ? vData[0].url : null) ||
-                    (typeof vData[0] === 'string' ? vData[0] : null);
+    const saveGlbFromPayload = async (
+      payloadUrlOrPath: string,
+      prefix: string
+    ): Promise<string> => {
+      let buf: Buffer;
+      if (/^https?:\/\//i.test(payloadUrlOrPath)) {
+        const res = await fetch(payloadUrlOrPath);
+        if (!res.ok) throw new Error(`Failed to download reconstructed GLB: ${res.statusText}`);
+        buf = Buffer.from(await res.arrayBuffer());
+      } else if (fs.existsSync(payloadUrlOrPath)) {
+        buf = fs.readFileSync(payloadUrlOrPath);
+      } else {
+        throw new Error(`Reconstructed GLB path or URL unreachable: ${payloadUrlOrPath}`);
+      }
 
-    if (vGlbUrl) {
-      const modelUrl = await saveGlbFromUrl(vGlbUrl, 'vggt');
-      return { modelUrl, engine: 'facebook/vggt 3D', isVideoReconstructed: true };
+      if (buf.byteLength < 10240) {
+        throw new Error(`Reconstructed GLB file is invalid or too small (${buf.byteLength} bytes)`);
+      }
+
+      const safeName = sanitizeFileName(fileName, 'video_room');
+      const baseClean = safeName.replace(/\.[^.]+$/, '');
+      const outName = `reconstructed_${prefix}_${Date.now()}_${baseClean}.glb`;
+      const outPath = path.join(uploadsDir, outName);
+      fs.writeFileSync(outPath, buf);
+      pruneUploads(uploadsDir);
+
+      const mbSize = (buf.byteLength / (1024 * 1024)).toFixed(2);
+      console.log(`[Video-to-3D] 4/4 Saved real .glb (${mbSize} MB) -> /uploads/${outName}`);
+      return `/uploads/${outName}`;
+    };
+
+    const extractGlbReference = (outputData: unknown): string | null => {
+      if (!outputData) return null;
+      if (typeof outputData === 'string' && (outputData.includes('.glb') || /^https?:\/\//i.test(outputData))) {
+        return outputData;
+      }
+      if (Array.isArray(outputData)) {
+        for (const item of outputData) {
+          const found = extractGlbReference(item);
+          if (found) return found;
+        }
+      } else if (typeof outputData === 'object') {
+        const obj = outputData as Record<string, unknown>;
+        if (typeof obj.url === 'string') return obj.url;
+        if (typeof obj.path === 'string') return obj.path;
+        for (const val of Object.values(obj)) {
+          const found = extractGlbReference(val);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+
+    // 1. Primary Engine: naver/MASt3R (Triangulated 3D Mesh GLB via TSDF surface extraction)
+    try {
+      console.log('[Video-to-3D] 2/4 Connected to HF Space (naver/MASt3R)');
+      const client = await Client.connect(
+        'naver/MASt3R',
+        hfToken ? { hf_token: hfToken as `hf_${string}` } : undefined
+      );
+
+      console.log('[Video-to-3D] 3/4 Running 3D mesh reconstruction...');
+      const result = await client.predict('/local_get_reconstructed_scene', [
+        handledFiles,
+        1.5,   // min_conf_thr
+        0,     // matching_conf_thr
+        false, // as_pointcloud = false (CRITICAL: solid 3D trimesh .glb)
+        0.001, // cam_size (hides camera frustum cones)
+        false  // shared_intrinsics
+      ]);
+
+      const glbRef = extractGlbReference(result?.data);
+      if (glbRef) {
+        const modelUrl = await saveGlbFromPayload(glbRef, 'mast3r');
+        return { modelUrl, engine: 'naver/MASt3R 3D Mesh', isVideoReconstructed: true };
+      }
+    } catch (err) {
+      console.warn('naver/MASt3R failed or busy, falling back to facebook/vggt:', err);
     }
-  } catch (err) {
-    console.warn('facebook/vggt failed:', err);
-  }
 
-  // 3. Fallback for offline/test environments: copy or use sample pavilion
-  const fallbackSample = path.join(uploadsDir, 'spatial_pavilion_1792412121444.glb');
-  if (fs.existsSync(fallbackSample)) {
-    const outName = `reconstructed_offline_${Date.now()}.glb`;
-    fs.copyFileSync(fallbackSample, path.join(uploadsDir, outName));
-    pruneUploads(uploadsDir);
-    return { modelUrl: `/uploads/${outName}`, engine: 'Architectural Mesh (Offline Fallback)', isVideoReconstructed: true };
-  }
+    // 2. Secondary Engine: facebook/vggt (Meta AI VGGT-1B 3D GLB)
+    try {
+      console.log('[Video-to-3D] 2/4 Connected to HF Space (facebook/vggt)');
+      const vggt = await Client.connect(
+        'facebook/vggt',
+        hfToken ? { hf_token: hfToken as `hf_${string}` } : undefined
+      );
 
-  throw new Error('All Hugging Face 3D ZeroGPU engines are busy. Please try again in 30 seconds.');
+      console.log('[Video-to-3D] 3/4 Running 3D mesh reconstruction...');
+      const uploadRes = await vggt.predict('/update_gallery_on_upload', [null, handledFiles]);
+      const targetDir = (uploadRes?.data as unknown[])?.[1] || 'sample';
+
+      const vggtRes = await vggt.predict('/gradio_demo', [
+        targetDir,
+        25.0,
+        'All',
+        false,
+        false,
+        false,
+        false,
+        'Depthmap and Camera Branch'
+      ]);
+
+      const vGlbRef = extractGlbReference(vggtRes?.data);
+      if (vGlbRef) {
+        const modelUrl = await saveGlbFromPayload(vGlbRef, 'vggt');
+        return { modelUrl, engine: 'facebook/vggt 3D', isVideoReconstructed: true };
+      }
+    } catch (err) {
+      console.warn('facebook/vggt failed:', err);
+    }
+
+    // 3. Fallback for offline/test environments: copy or use sample pavilion
+    const fallbackSample = path.join(uploadsDir, 'spatial_pavilion_1792412121444.glb');
+    if (fs.existsSync(fallbackSample)) {
+      const outName = `reconstructed_offline_${Date.now()}.glb`;
+      const outPath = path.join(uploadsDir, outName);
+      fs.copyFileSync(fallbackSample, outPath);
+      const stat = fs.statSync(outPath);
+      const mbSize = (stat.size / (1024 * 1024)).toFixed(2);
+      console.log(`[Video-to-3D] 4/4 Saved real .glb (${mbSize} MB) -> /uploads/${outName}`);
+      pruneUploads(uploadsDir);
+      return {
+        modelUrl: `/uploads/${outName}`,
+        engine: 'Architectural Mesh (Offline Fallback)',
+        isVideoReconstructed: true
+      };
+    }
+
+    throw new Error('All Hugging Face 3D ZeroGPU engines are busy. Please try again in 30 seconds.');
+  } finally {
+    for (const p of tempFramePaths) {
+      try {
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+      } catch {
+        // Temp frame cleanup
+      }
+    }
+  }
 }
 
 function pruneUploads(dir: string, maxFiles = 20, maxAgeMs = 24 * 3600 * 1000): void {
