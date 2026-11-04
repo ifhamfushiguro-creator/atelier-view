@@ -14,7 +14,6 @@ import {
 } from '../../lib/3d/simple-normalizer';
 import { analyzeBuildingFloorsAndRooms } from '../../lib/3d/waypoint-analyzer';
 import { buildSculpturePedestalScene, type SculpturePedestal } from '../../lib/3d/sculpture-pedestal';
-import { calculateWalkStep, EYE_HEIGHT } from '../../lib/3d/walk-physics';
 import {
   buildLivingCityScene,
   buildFloorStoryHighlight,
@@ -150,7 +149,6 @@ export default function StreetViewViewer({
     cutWorldY: 100
   });
 
-  const keys = useRef<{ [k: string]: boolean }>({});
   const [loading, setLoading] = useState({ active: false, progress: 0 });
   const curFloor = floors.find((f) => f.id === activeFloorId) || floors[0];
 
@@ -164,7 +162,7 @@ export default function StreetViewViewer({
 
     const totalH = modelBounds.current.height || 3;
     const cutWorldY = targetFloor.cutY !== undefined ? targetFloor.cutY : (targetFloor.floorY + totalH * 0.24);
-    const bottomCutY = targetFloor.bottomCutY !== undefined ? targetFloor.bottomCutY : (targetFloor.floorY - 0.25);
+    const bottomCutY = targetFloor.floorY - 0.18;
 
     targetTopClipRef.current = cutWorldY;
     targetBottomClipRef.current = -bottomCutY;
@@ -265,8 +263,8 @@ export default function StreetViewViewer({
       renderer.setClearColor(0x000000, 0);
     }
     renderer.setSize(w, h);
-    // PDF Field Guide: setPixelRatio clamped to 1.5 for maximum GPU fillrate efficiency
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    // Native High-DPI Resolution clamped to 2.0 with antialiasing
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.86;
@@ -375,7 +373,7 @@ export default function StreetViewViewer({
         cam.position.x = THREE.MathUtils.lerp(cam.position.x, normMouse.current.x * 0.25, 0.05);
         cam.position.y = THREE.MathUtils.lerp(cam.position.y, 0.95 + normMouse.current.y * 0.15, 0.05);
         cam.position.z = THREE.MathUtils.lerp(cam.position.z, 2.85, 0.05);
-        cam.lookAt(0, 0.72, 0);
+        cam.lookAt(0, 0.45, 0);
       } else {
         const bounds = modelBounds.current;
 
@@ -448,14 +446,14 @@ export default function StreetViewViewer({
           cam.position.lerp(target, 0.08);
           cam.lookAt(oc.x, oc.y, oc.z);
 
-          // Project Clean HTML Room Tags directly without triggering React re-renders
+          // Project Clean HTML Room Waypoint Pins at Floor Surface Level (y + 0.08m)
           if (containerRef.current) {
             const cw = containerRef.current.clientWidth, ch = containerRef.current.clientHeight;
             if (curF) {
               curF.rooms.forEach((r) => {
                 const el = roomTagRefs.current[r.id];
                 if (!el) return;
-                const v = new THREE.Vector3(r.position[0], r.position[1] + 0.55, r.position[2]).project(cam);
+                const v = new THREE.Vector3(r.position[0], r.position[1] + 0.08, r.position[2]).project(cam);
                 if (v.z < 1) {
                   const sx = ((v.x + 1) * 0.5) * cw, sy = ((-v.y + 1) * 0.5) * ch;
                   el.style.transform = `translate3d(${sx}px, ${sy}px, 0) translate(-50%, -50%)`;
@@ -467,67 +465,21 @@ export default function StreetViewViewer({
             }
           }
         } else {
-          // Inside Room Modes ('room-walk' or 'room-view'): Enable WASD / Arrow Walking
-          const k = keys.current;
-          const isWalkingKey = Boolean(
-            k['KeyW'] || k['ArrowUp'] || k['KeyS'] || k['ArrowDown'] ||
-            k['KeyD'] || k['ArrowRight'] || k['KeyA'] || k['ArrowLeft']
-          );
-
+          // Inside Room Modes ('room-walk' or 'room-view'): Pure Waypoint-to-Waypoint Glide Navigation
           const curF = floorsRef.current.find((f) => f.id === activeFloorIdRef.current) || floorsRef.current[0];
           const totalH = modelBounds.current.height || 3;
           const storyClearH = totalH * 0.27;
-          const dynamicEyeHeight = THREE.MathUtils.clamp(storyClearH * 0.44, 0.68, 1.25);
+          const dynamicEyeHeight = THREE.MathUtils.clamp(storyClearH * 0.40, 0.75, 1.35);
 
-          if (isWalkingKey) {
-            const moveSpeed = 3.6 * delta, yaw = yawRef.current;
-            const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-            const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-            const move = new THREE.Vector3();
-            if (k['KeyW'] || k['ArrowUp']) move.add(fwd);
-            if (k['KeyS'] || k['ArrowDown']) move.sub(fwd);
-            if (k['KeyD'] || k['ArrowRight']) move.add(right);
-            if (k['KeyA'] || k['ArrowLeft']) move.sub(right);
+          const curWp = waypointsRef.current.find((w) => w.id === activeRoomIdRef.current) || waypointsRef.current[0];
+          if (curWp) {
+            const targetX = curWp.position[0];
+            const targetY = curWp.position[1] + dynamicEyeHeight;
+            const targetZ = curWp.position[2];
 
-            if (move.lengthSq() > 0) {
-              roomCamTargetRef.current = null;
-              targetYawRef.current = null;
-              targetPitchRef.current = null;
-              const curRoom = waypointsRef.current.find((w) => w.id === activeRoomIdRef.current);
-              const camX = cam.position.x;
-              const camZ = cam.position.z;
-              const nearbyMeshes = interactableMeshesRef.current.filter((mesh) => {
-                const box = mesh.userData.__worldBox as THREE.Box3 | undefined;
-                if (!box) return true;
-                const dx = Math.max(box.min.x - camX, 0, camX - box.max.x);
-                const dz = Math.max(box.min.z - camZ, 0, camZ - box.max.z);
-                return (dx * dx + dz * dz) <= 6.25;
-              });
-
-              const step = calculateWalkStep(
-                cam.position,
-                move.normalize().multiplyScalar(moveSpeed),
-                floorYRef.current,
-                nearbyMeshes.length > 0 ? nearbyMeshes : interactableMeshesRef.current,
-                collisionRay,
-                dynamicEyeHeight,
-                {
-                  center: curRoom ? curRoom.position : undefined,
-                  radius: curRoom ? curRoom.roomRadius || 3.8 : 3.8,
-                  lockFloorY: false,
-                  storyClearHeight: storyClearH
-                }
-              );
-              cam.position.copy(step.nextPos);
-              floorYRef.current = step.floorY;
-            }
-          }
-
-          if (roomCamTargetRef.current) {
-            cam.position.lerp(roomCamTargetRef.current, 0.08);
-            if (cam.position.distanceTo(roomCamTargetRef.current) < 0.03) {
-              roomCamTargetRef.current = null;
-            }
+            cam.position.x = THREE.MathUtils.damp(cam.position.x, targetX, 4.2, delta);
+            cam.position.y = THREE.MathUtils.damp(cam.position.y, targetY, 4.2, delta);
+            cam.position.z = THREE.MathUtils.damp(cam.position.z, targetZ, 4.2, delta);
           }
 
           if (targetYawRef.current !== null && targetPitchRef.current !== null) {
@@ -549,6 +501,23 @@ export default function StreetViewViewer({
             Math.cos(pitchRef.current) * -Math.cos(yawRef.current)
           );
           cam.lookAt(cam.position.clone().add(look));
+
+          // Project Floor Waypoint Pins during Room Glide View as well
+          if (containerRef.current && curF) {
+            const cw = containerRef.current.clientWidth, ch = containerRef.current.clientHeight;
+            curF.rooms.forEach((r) => {
+              const el = roomTagRefs.current[r.id];
+              if (!el) return;
+              const v = new THREE.Vector3(r.position[0], r.position[1] + 0.08, r.position[2]).project(cam);
+              if (v.z < 1) {
+                const sx = ((v.x + 1) * 0.5) * cw, sy = ((-v.y + 1) * 0.5) * ch;
+                el.style.transform = `translate3d(${sx}px, ${sy}px, 0) translate(-50%, -50%)`;
+                el.style.display = 'flex';
+              } else {
+                el.style.display = 'none';
+              }
+            });
+          }
         }
       }
 
@@ -615,7 +584,7 @@ export default function StreetViewViewer({
       // Floor 01: cutY = minY + H * 0.24, bottomCutY = minY - 0.25
       // Floor 02: cutY = minY + H * 0.45, bottomCutY = minY + H * 0.28
       const cutWorldY = curF?.cutY !== undefined ? curF.cutY : (curF ? curF.floorY + (curF.maxY - curF.floorY) * 0.54 : bHeight * 0.54);
-      const bottomCutY = curF?.bottomCutY !== undefined ? curF.bottomCutY : (curF ? curF.floorY - 0.25 : -0.25);
+      const bottomCutY = curF ? (curF.floorY - 0.18) : -0.18;
 
       targetTopClipRef.current = cutWorldY;
       targetBottomClipRef.current = -bottomCutY;
@@ -657,7 +626,7 @@ export default function StreetViewViewer({
       if (floorHighlightRef.current) floorHighlightRef.current.visible = false;
 
       const storyClearH = bHeight * 0.27;
-      const fBottom = curF?.bottomCutY !== undefined ? curF.bottomCutY : (curF ? curF.floorY - 0.25 : -0.25);
+      const fBottom = curF ? (curF.floorY - 0.18) : -0.18;
       const ceilingY = curF ? curF.floorY + storyClearH : storyClearH;
 
       // Soft architectural ceiling plane
@@ -1044,8 +1013,8 @@ export default function StreetViewViewer({
       return;
     }
 
-    // FIX 2 & 3: Clicking any room/floor in 3D Dollhouse dives smoothly inside that room!
-    if (funnelStage === 'floorplan') {
+    // Clicking any room/floor in 3D Dollhouse or Room View glides smoothly to that waypoint!
+    if (funnelStage === 'floorplan' || funnelStage === 'room-view' || funnelStage === 'room-walk') {
       const hits = raycaster.intersectObjects(modelGroup.current.children, true);
       const hit = hits.find((h) => h.object.name !== '__living_city_context__' && h.object.name !== '__floor_collider__');
       if (hit && curFloor?.rooms && curFloor.rooms.length > 0) {
@@ -1091,30 +1060,7 @@ export default function StreetViewViewer({
     if (hits.length > 0) onAddPin([hits[0].point.x, hits[0].point.y, hits[0].point.z]);
   }, [onAddPin]);
 
-  useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      // Ignore key events when typing inside inputs, textareas or modals
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return;
-      }
-      keys.current[e.code] = true;
-    };
-    const up = (e: KeyboardEvent) => {
-      keys.current[e.code] = false;
-    };
-    const onBlur = () => {
-      keys.current = {};
-    };
-    window.addEventListener('keydown', down);
-    window.addEventListener('keyup', up);
-    window.addEventListener('blur', onBlur);
-    return () => {
-      window.removeEventListener('keydown', down);
-      window.removeEventListener('keyup', up);
-      window.removeEventListener('blur', onBlur);
-    };
-  }, []);
+
 
   return (
     <div
@@ -1182,30 +1128,41 @@ export default function StreetViewViewer({
         </div>
       )}
 
-      {/* Floating HTML Room Pins in Dollhouse Mode (Sleek Circular Dots Expanding on Hover) */}
-      {funnelStage === 'floorplan' && curFloor?.rooms.map((r) => (
-        <button
-          key={r.id}
-          ref={(el) => { roomTagRefs.current[r.id] = el; }}
-          style={{ display: 'none', left: 0, top: 0, willChange: 'transform' }}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            triggerRoomDive(r);
-          }}
-          className="absolute pointer-events-auto group z-20 select-none cursor-pointer focus:outline-none"
-        >
-          <div className="flex items-center gap-2 bg-[#0A0A0A]/90 hover:bg-[#0A0A0A] backdrop-blur-md border border-white/20 hover:border-[#10B981] rounded-full p-1 group-hover:px-3.5 group-hover:py-1.5 shadow-2xl transition-all duration-200">
-            <span className="w-5 h-5 rounded-full bg-[#10B981] border-2 border-white shadow-md flex items-center justify-center shrink-0">
-              <span className="w-1.5 h-1.5 rounded-full bg-white" />
-            </span>
-            <span className="hidden group-hover:inline-flex items-center gap-2 font-mono text-[11px] text-white whitespace-nowrap pr-1 animate-fade-in">
-              <span className="font-semibold text-emerald-400">● {r.name.toUpperCase()}</span>
-              <span className="text-[9px] text-[#E5C158] uppercase tracking-wider font-mono">DIVE →</span>
-            </span>
-          </div>
-        </button>
-      ))}
+      {/* Floating HTML Waypoint Pins on Floor (Dollhouse and Room Navigation) */}
+      {(funnelStage === 'floorplan' || funnelStage === 'room-view' || funnelStage === 'room-walk') && curFloor?.rooms.map((r) => {
+        const isCurrent = r.id === activeRoomId;
+        return (
+          <button
+            key={r.id}
+            ref={(el) => { roomTagRefs.current[r.id] = el; }}
+            style={{ display: 'none', left: 0, top: 0, willChange: 'transform' }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              triggerRoomDive(r);
+            }}
+            className="absolute pointer-events-auto group z-20 select-none cursor-pointer focus:outline-none"
+          >
+            <div className={`flex items-center gap-2 backdrop-blur-md border rounded-full p-1 group-hover:px-3 group-hover:py-1 shadow-2xl transition-all duration-200 ${
+              isCurrent
+                ? 'bg-emerald-500/90 border-white'
+                : 'bg-[#0A0A0A]/90 hover:bg-[#0A0A0A] border-white/20 hover:border-emerald-400'
+            }`}>
+              <span className={`w-4 h-4 rounded-full border-2 border-white shadow-md flex items-center justify-center shrink-0 ${
+                isCurrent ? 'bg-white' : 'bg-[#10B981]'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${isCurrent ? 'bg-emerald-600' : 'bg-white'}`} />
+              </span>
+              <span className="hidden group-hover:inline-flex items-center gap-2 font-mono text-[10px] text-white whitespace-nowrap pr-1 animate-fade-in">
+                <span className="font-semibold text-emerald-400">● {r.name.toUpperCase()}</span>
+                <span className="text-[9px] text-[#E5C158] uppercase tracking-wider font-mono">
+                  {funnelStage === 'floorplan' ? 'DIVE →' : 'GLIDE →'}
+                </span>
+              </span>
+            </div>
+          </button>
+        );
+      })}
 
       {loading.active && (
         <div className="absolute inset-0 bg-[#070605]/85 backdrop-blur-md flex flex-col items-center justify-center z-50 pointer-events-none">

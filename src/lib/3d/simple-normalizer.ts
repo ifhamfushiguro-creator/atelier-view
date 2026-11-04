@@ -136,10 +136,25 @@ export function applyVisualPolish(
       emissive?: THREE.Color; roughness?: number; metalness?: number; transparent?: boolean; opacity?: number;
     };
 
+    // Enforce 16x anisotropic filtering and linear mipmaps across all textures
+    for (const val of Object.values(origMat)) {
+      if (val && typeof val === 'object' && 'isTexture' in val && (val as THREE.Texture).isTexture) {
+        const tex = val as THREE.Texture;
+        tex.anisotropy = maxAnisotropy;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = true;
+        tex.needsUpdate = true;
+      }
+    }
+
     const activeMap = origMat.map || origMat.emissiveMap;
     if (activeMap) {
-      activeMap.anisotropy = maxAnisotropy; activeMap.colorSpace = THREE.SRGBColorSpace;
-      activeMap.minFilter = THREE.LinearMipmapLinearFilter; activeMap.generateMipmaps = true;
+      activeMap.anisotropy = maxAnisotropy;
+      activeMap.colorSpace = THREE.SRGBColorSpace;
+      activeMap.minFilter = THREE.LinearMipmapLinearFilter;
+      activeMap.magFilter = THREE.LinearFilter;
+      activeMap.generateMipmaps = true;
       activeMap.needsUpdate = true;
     }
 

@@ -214,6 +214,28 @@ test('analyzeBuildingFloorsAndRooms partitions 2-story buildings (H >= 3.2m) int
   assert.ok(Math.abs(floors[1].cutY - (minY + H * 0.50)) < 0.02, `Floor 02 cutY must be minY + H * 0.50, got ${floors[1].cutY}`);
   assert.ok(floors[1].bottomCutY !== undefined && Math.abs(floors[1].bottomCutY - (minY + H * 0.30)) < 0.02, `Floor 02 bottomCutY must be minY + H * 0.30, got ${floors[1].bottomCutY}`);
 
-  assert.ok(floors[0].rooms.length >= 1);
-  assert.ok(floors[1].rooms.length >= 1);
+  assert.ok(floors[0].rooms.length >= 5, `Expected at least 5 waypoints on Floor 01, got ${floors[0].rooms.length}`);
+  assert.ok(floors[1].rooms.length >= 5, `Expected at least 5 waypoints on Floor 02, got ${floors[1].rooms.length}`);
+
+  // All waypoints must sit flush at floor level (not floating at wall top height)
+  floors[0].rooms.forEach((wp) => {
+    assert.ok(Math.abs(wp.position[1] - floors[0].floorY) < 0.25, `Waypoint ${wp.id} must sit flush near floorY (${floors[0].floorY}), got ${wp.position[1]}`);
+  });
+});
+
+test('analyzeBuildingFloorsAndRooms dynamically scales floor count for tall multi-story towers', () => {
+  const root = new THREE.Group();
+  // A tall 10-story tower with H = 30m, W = 8m, D = 8m (H / min(W, D) = 3.75 > 1.2)
+  const tower = new THREE.Mesh(new THREE.BoxGeometry(8, 30, 8), new THREE.MeshStandardMaterial());
+  tower.position.set(0, 15, 0);
+  root.add(tower);
+  root.updateMatrixWorld(true);
+
+  const floors = analyzeBuildingFloorsAndRooms(root);
+  assert.ok(floors.length >= 8 && floors.length <= 12, `Expected ~10 floors, got ${floors.length}`);
+
+  // Each floor must have at least 5 waypoints
+  floors.forEach((f) => {
+    assert.ok(f.rooms.length >= 5, `Floor ${f.id} should have >= 5 waypoints, got ${f.rooms.length}`);
+  });
 });

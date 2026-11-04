@@ -279,11 +279,7 @@ export default function SpatialWorkspacePage() {
       <div
         className="relative w-screen h-screen overflow-hidden text-stone-100 font-sans select-none"
         style={{
-          background: isModelLoaded
-            ? '#070605'
-            : `conic-gradient(from 162deg at 50% -8%, transparent 0deg, rgba(212, 148, 58, 0.16) 14deg, rgba(255, 204, 112, 0.28) 18deg, rgba(212, 148, 58, 0.16) 22deg, transparent 36deg),
-               radial-gradient(ellipse 42% 52% at 50% 48%, rgba(235, 168, 68, 0.24) 0%, rgba(140, 82, 20, 0.09) 48%, transparent 75%),
-               #040302`
+          background: '#0A0A0A'
         }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -611,82 +607,101 @@ export default function SpatialWorkspacePage() {
                   onClick={() => {
                     const firstRoom = floorRooms[0] || waypoints[0];
                     if (firstRoom) setActiveRoomId(firstRoom.id);
-                    setFunnelStage('room-walk');
+                    setFunnelStage('room-view');
                   }}
                   className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
                 >
-                  <Footprints className="w-4 h-4" />
-                  Walk Inside Floor (WASD)
-                </button>
-                <button
-                  onClick={() => {
-                    const firstRoom = floorRooms[0] || waypoints[0];
-                    if (firstRoom) setActiveRoomId(firstRoom.id);
-                    setFunnelStage('room-view');
-                  }}
-                  className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white font-medium text-xs transition-all cursor-pointer border border-white/10"
-                >
-                  <Maximize2 className="w-3.5 h-3.5 text-[#D4B483]" />
-                  Curated View
+                  <Eye className="w-4 h-4" />
+                  Explore Waypoints & Rooms
                 </button>
               </div>
             </aside>
           )}
 
-          {/* 3. Bottom Room Bar (Stages 3 & 4) */}
+          {/* 3. Bottom Waypoint Navigation Dock */}
           {(funnelStage === 'room-view' || funnelStage === 'room-walk') && (
             <footer className="absolute bottom-6 left-6 right-6 z-20 flex items-center justify-between gap-4 pointer-events-none">
-              {/* Left: Back to Floorplan */}
-              <div className="pointer-events-auto">
+              {/* Left: Back to Floorplan + Floor Switcher Pill */}
+              <div className="pointer-events-auto flex items-center gap-2">
                 <button
                   onClick={() => setFunnelStage('floorplan')}
                   className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 hover:border-amber-400/40 text-xs font-mono uppercase tracking-wider text-white shadow-2xl transition-all cursor-pointer"
                 >
                   <ChevronLeft className="w-4 h-4 text-[#D4B483]" />
-                  Back to Floorplan
+                  Floorplan
+                </button>
+                <div className="flex bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-1 gap-1">
+                  {floors.map((f) => {
+                    const isCur = f.id === currentFloor?.id;
+                    return (
+                      <button
+                        key={f.id}
+                        onClick={() => {
+                          setActiveFloorId(f.id);
+                          if (f.rooms.length > 0) setActiveRoomId(f.rooms[0].id);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-mono transition-all cursor-pointer ${
+                          isCur
+                            ? 'bg-amber-400/20 text-[#D4B483] border border-amber-400/30 font-semibold'
+                            : 'text-zinc-400 hover:text-white'
+                        }`}
+                      >
+                        {f.label.split('—')[0].trim()}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Center: Sleek Horizontal Scrollable Dock of Numbered Waypoints + Prev/Next Buttons */}
+              <div className="relative pointer-events-auto bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center gap-2 shadow-2xl max-w-[55vw]">
+                {/* Floating Waypoint Hint */}
+                <div className="absolute -top-9 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-[#0a0a0a]/95 backdrop-blur-md border border-[#D4B483]/30 text-[9px] font-mono text-[#D4B483] uppercase tracking-wider flex items-center gap-1.5 pointer-events-none shadow-xl whitespace-nowrap">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  Drag Mouse to Look 360° · Click Any Floor Waypoint or Dock to Glide
+                </div>
+
+                <button
+                  onClick={handlePrevRoom}
+                  title="Previous Waypoint"
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/15 text-zinc-300 hover:text-white transition-all cursor-pointer shrink-0"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                {/* Horizontal Scrollable Waypoint Buttons */}
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 px-1 max-w-[42vw]">
+                  {floorRooms.map((wp) => {
+                    const isSel = wp.id === activeRoomId;
+                    return (
+                      <button
+                        key={wp.id}
+                        onClick={() => setActiveRoomId(wp.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-mono whitespace-nowrap transition-all cursor-pointer flex items-center gap-2 shrink-0 ${
+                          isSel
+                            ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-500/50 shadow-sm font-semibold'
+                            : 'bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white border border-transparent'
+                        }`}
+                      >
+                        <span className={`w-2 h-2 rounded-full ${isSel ? 'bg-emerald-400 shadow-[0_0_8px_#10B981]' : 'bg-zinc-600'}`} />
+                        {wp.name}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  onClick={handleNextRoom}
+                  title="Next Waypoint"
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/15 text-zinc-300 hover:text-white transition-all cursor-pointer shrink-0"
+                >
+                  <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Center: Room Controller & Walk Toggle */}
-              <div className="relative pointer-events-auto bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center gap-3 shadow-2xl">
-                {/* Floating Walking Hint */}
-                {funnelStage === 'room-walk' && (
-                  <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-3.5 py-1 rounded-full bg-[#0a0a0a]/95 backdrop-blur-md border border-[#D4B483]/40 text-[10px] font-mono text-[#D4B483] uppercase tracking-wider flex items-center gap-2 pointer-events-none shadow-xl whitespace-nowrap">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    WASD / Arrows to Walk · Mouse Drag to Look
-                  </div>
-                )}
-                {/* Room title & indicator */}
-                <div className="px-3 border-r border-white/10 text-xs font-mono">
-                  <span className="text-[10px] text-zinc-500 block uppercase">Curated Volume</span>
-                  <span className="font-semibold text-white">
-                    {String(currentRoomIndex + 1).padStart(2, '0')}/{String(floorRooms.length).padStart(2, '0')} · {currentRoom?.name.replace(/^\d+\.\s*/, '')}
-                  </span>
-                </div>
-
-                {/* Primary Mode Toggle: Walk Inside Room (WASD) vs Lock to Room View */}
-                {funnelStage === 'room-view' ? (
-                  <button
-                    onClick={() => setFunnelStage('room-walk')}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
-                  >
-                    <Footprints className="w-4 h-4" />
-                    Walk Inside Room (WASD)
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setFunnelStage('room-view')}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-semibold text-xs transition-all cursor-pointer"
-                  >
-                    <Eye className="w-4 h-4 text-amber-400" />
-                    Lock to Curated View
-                  </button>
-                )}
-
-                <div className="w-[1px] h-6 bg-white/10" />
-
-                {/* Visual Polish Selector */}
-                <div className="flex bg-black/40 p-1 rounded-xl border border-white/5 gap-1">
+              {/* Right: Visual Polish Selector + Budget */}
+              <div className="pointer-events-auto bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-1.5 flex items-center gap-2 shadow-2xl">
+                <div className="flex bg-black/40 p-0.5 rounded-xl border border-white/5 gap-1">
                   <button
                     onClick={() => setVisualMode('sweet-spot')}
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
@@ -715,41 +730,13 @@ export default function SpatialWorkspacePage() {
                     Cyber CAD
                   </button>
                 </div>
-              </div>
 
-              {/* Right: Prev / Next Room Navigation + Budget */}
-              <div className="pointer-events-auto bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center gap-3 shadow-2xl">
-                <div className="flex items-center gap-1 pr-2 border-r border-white/10">
-                  <button
-                    onClick={handlePrevRoom}
-                    title="Previous Room"
-                    className="p-2 rounded-xl bg-white/5 hover:bg-white/15 text-zinc-300 hover:text-white transition-all cursor-pointer"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={handleNextRoom}
-                    title="Next Room"
-                    className="p-2 rounded-xl bg-white/5 hover:bg-white/15 text-zinc-300 hover:text-white transition-all cursor-pointer"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
+                <div className="px-3 border-l border-white/10 text-xs font-mono">
+                  <span className="text-[9px] text-zinc-500 block uppercase">Budget</span>
+                  <span className="font-serif font-bold text-[#D4B483] tabular-nums">
+                    ${totalBudget.toLocaleString()}.00
+                  </span>
                 </div>
-
-                <div className="flex items-center gap-3 px-2 text-xs font-mono">
-                  <div>
-                    <span className="text-[9px] uppercase text-zinc-500 block">Total Spec</span>
-                    <span className="font-bold text-white">${totalBudget.toLocaleString()}</span>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setIsSignOffOpen(true)}
-                  className="flex items-center gap-2 py-2 px-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-semibold tracking-wide transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
-                >
-                  <FileCheck2 className="w-4 h-4" />
-                  Confirm Approvals
-                </button>
               </div>
             </footer>
           )}
