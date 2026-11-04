@@ -3,6 +3,31 @@ import path from 'node:path';
 import os from 'node:os';
 import { Client, handle_file } from '@gradio/client';
 
+if (typeof globalThis.FormData !== 'undefined' && !(globalThis.FormData as any).__jpgPatched) {
+  const origAppend = globalThis.FormData.prototype.append;
+  globalThis.FormData.prototype.append = function (name: string, value: any, filename?: string) {
+    if (
+      name === 'files' &&
+      value instanceof Blob &&
+      !filename &&
+      !(value as File).name?.toLowerCase().endsWith('.jpg')
+    ) {
+      return origAppend.call(
+        this,
+        name,
+        value,
+        `frame_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`
+      );
+    }
+    return filename !== undefined
+      ? origAppend.call(this, name, value, filename)
+      : origAppend.call(this, name, value);
+  };
+  (globalThis.FormData as any).__jpgPatched = true;
+}
+
+const makeFileHandles = (paths: string[]) => paths.map((p) => handle_file(p));
+
 export interface ReconstructResponse {
   modelUrl: string;
   engine: string;
@@ -71,8 +96,6 @@ export async function reconstructVideoFrames(
     }
     console.log(`[Video-to-3D] 1/4 Saved ${tempFramePaths.length} temp frames`);
 
-    const handledFiles = tempFramePaths.map((p) => handle_file(p));
-
     const saveGlbFromPayload = async (
       payloadUrlOrPath: string,
       prefix: string
@@ -138,7 +161,7 @@ export async function reconstructVideoFrames(
       let result: any = null;
       try {
         result = await client.predict('/local_get_reconstructed_scene', [
-          handledFiles,
+          makeFileHandles(tempFramePaths),
           1.5,   // min_conf_thr
           0.0,   // matching_conf_thr = 0.0 (prevents AssertionError in sparse_ga.py)
           false, // as_pointcloud = false (solid 3D trimesh .glb)
@@ -148,11 +171,11 @@ export async function reconstructVideoFrames(
       } catch (err: any) {
         console.warn('naver/MASt3R 4-frame pass failed, retrying with 2 center frames:', err?.message || err);
         // Fallback retry using middle 2 frames to bypass multi-view sparse alignment assertions
-        const pairFiles = handledFiles.length >= 2
-          ? [handledFiles[Math.floor(handledFiles.length / 2) - 1], handledFiles[Math.floor(handledFiles.length / 2)]]
-          : handledFiles;
+        const pairPaths = tempFramePaths.length >= 2
+          ? [tempFramePaths[Math.floor(tempFramePaths.length / 2) - 1], tempFramePaths[Math.floor(tempFramePaths.length / 2)]]
+          : tempFramePaths;
         result = await client.predict('/local_get_reconstructed_scene', [
-          pairFiles,
+          makeFileHandles(pairPaths),
           1.5,
           0.0,
           false,
@@ -190,7 +213,7 @@ export async function reconstructVideoFrames(
       }
 
       console.log('[Video-to-3D] 3/4 Running 3D mesh reconstruction (facebook/vggt)...');
-      const uploadRes = await vggt.predict('/update_gallery_on_upload', [null, handledFiles]);
+      const uploadRes = await vggt.predict('/update_gallery_on_upload', [null, makeFileHandles(tempFramePaths)]) as any;
       const uploadData = (uploadRes?.data as unknown[]) || [];
       const targetDir = uploadData[1] || 'sample';
 
@@ -225,4 +248,3 @@ export async function reconstructVideoFrames(
     }
   }
 }
-

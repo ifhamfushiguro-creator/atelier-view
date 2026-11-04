@@ -6,7 +6,7 @@ import {
   sanitizeFileName,
   pruneUploads,
   type ReconstructResponse
-} from './src/lib/3d/video-reconstruction-service';
+} from './src/lib/3d/video-reconstruction-service.ts';
 
 export { reconstructVideoFrames, sanitizeFileName, pruneUploads, type ReconstructResponse };
 
