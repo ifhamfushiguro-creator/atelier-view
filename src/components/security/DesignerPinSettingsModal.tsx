@@ -40,16 +40,10 @@ export const DesignerPinSettingsModal: React.FC<DesignerPinSettingsModalProps> =
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Inline editing state for changing PIN
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editedPin, setEditedPin] = useState<string>('');
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
-
-  // Copied feedback map: key is `${projectId}_${type}`
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-
-  // Visible PINs toggle
   const [visiblePins, setVisiblePins] = useState<Record<string, boolean>>({});
 
   const designerToken = getOrCreateDesignerToken();
@@ -105,8 +99,6 @@ export const DesignerPinSettingsModal: React.FC<DesignerPinSettingsModalProps> =
         pinCode: editedPin.trim(),
         designerToken,
       });
-
-      // Update local state
       setProjects((prev) =>
         prev.map((p) =>
           p.projectId === proj.projectId

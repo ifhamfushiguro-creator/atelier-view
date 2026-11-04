@@ -28,11 +28,8 @@ export function pruneUploads(dir: string, maxFiles = 20, maxAgeMs = 24 * 3600 * 
       }
     });
   } catch {
-    // Non-critical background disk cleanup
   }
 }
-
-// Automatically load local .env if present
 try {
   const envPath = path.resolve(process.cwd(), '.env');
   if (fs.existsSync(envPath)) {
@@ -54,7 +51,6 @@ try {
     });
   }
 } catch {
-  // Ignore env read issues
 }
 
 
@@ -112,8 +108,6 @@ app.use((_req, res, next) => {
 });
 app.use(express.json({ limit: '50mb' }));
 app.use(express.raw({ type: ['application/octet-stream', 'model/gltf-binary'], limit: '100mb' }));
-
-// Health check endpoint for container orchestrators and uptime checks
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
@@ -145,10 +139,6 @@ function recordPinFailure(ip: string): void {
     entry.count += 1;
   }
 }
-
-
-
-// 1. Save or update a project with PIN protection
 app.post('/api/projects/save', (req, res) => {
   try {
     const { projectId, title, modelUrl, pinCode, designerToken } = req.body || {};
@@ -209,8 +199,6 @@ app.post('/api/projects/save', (req, res) => {
     return res.status(500).json({ error: 'Failed to save project' });
   }
 });
-
-// 2. Fetch all projects created by this designer (including PIN, modelUrl, and approvals)
 app.get('/api/projects/my-projects', (req, res) => {
   try {
     const designerToken = (req.query.designerToken as string) || (req.headers['x-designer-token'] as string);
@@ -233,8 +221,6 @@ app.get('/api/projects/my-projects', (req, res) => {
     return res.status(500).json({ error: 'Failed to retrieve projects' });
   }
 });
-
-// 3. Public metadata endpoint - CRITICAL SECURITY: Never return modelUrl or pinCode
 const handleGetPublicProject = (req: express.Request, res: express.Response) => {
   try {
     const projectId = String(req.params.projectId);
@@ -259,8 +245,6 @@ const handleGetPublicProject = (req: express.Request, res: express.Response) => 
 
 app.get('/api/projects/:projectId/public', handleGetPublicProject);
 app.get('/api/projects/:projectId/meta', handleGetPublicProject);
-
-// 4. Verify PIN endpoint - returns modelUrl only upon correct PIN
 app.post('/api/projects/:projectId/verify-pin', (req, res) => {
   try {
     const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
@@ -304,8 +288,6 @@ app.post('/api/projects/:projectId/verify-pin', (req, res) => {
     return res.status(500).json({ verified: false, error: 'Failed to verify access code' });
   }
 });
-
-// 5. 1-Tap Client Approval & Sign-Off Receipt endpoint
 app.post('/api/projects/:projectId/approve', (req, res) => {
   try {
     const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
@@ -368,8 +350,6 @@ app.post('/api/projects/:projectId/approve', (req, res) => {
     return res.status(500).json({ error: 'Failed to record design approval' });
   }
 });
-
-// 6. Direct GLB Model Upload endpoint (persists local designer models)
 app.post('/api/projects/upload-glb', (req, res) => {
   try {
     const uploadsDir = path.resolve(process.cwd(), 'public', 'uploads');
@@ -410,8 +390,6 @@ app.post('/api/projects/upload-glb', (req, res) => {
     return res.status(500).json({ error: 'Failed to upload GLB model' });
   }
 });
-
-// Production SPA static delivery
 const isProd = process.env.NODE_ENV === 'production';
 const distPath = path.resolve(process.cwd(), 'dist');
 const distIndexPath = path.join(distPath, 'index.html');

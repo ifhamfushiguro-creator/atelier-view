@@ -44,8 +44,6 @@ export const PinSetupModal: React.FC<PinSetupModalProps> = ({
   const [showPin, setShowPin] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Result state after saving
   const [savedData, setSavedData] = useState<{
     projectId: string;
     title: string;

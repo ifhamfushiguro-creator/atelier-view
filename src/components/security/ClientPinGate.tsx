@@ -312,8 +312,6 @@ export const ClientPinGate: React.FC<ClientPinGateProps> = ({
     setIsUnlocked(true);
     setUnlockedModelUrl(null);
   };
-
-  // If there's no project in URL, or project has been unlocked, render children
   if (!activeProjectId || isUnlocked) {
     return (
       <>
@@ -327,8 +325,6 @@ export const ClientPinGate: React.FC<ClientPinGateProps> = ({
       </>
     );
   }
-
-  // Loading public metadata
   if (isLoadingMeta) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#070605] text-stone-100 select-none">
@@ -339,8 +335,6 @@ export const ClientPinGate: React.FC<ClientPinGateProps> = ({
       </div>
     );
   }
-
-  // Error loading metadata (e.g. invalid project ID)
   if (metaError) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-[#070605] text-stone-100 select-none">
@@ -368,8 +362,6 @@ export const ClientPinGate: React.FC<ClientPinGateProps> = ({
       </div>
     );
   }
-
-  // Display the PIN unlock screen
   return (
     <PinUnlockScreen
       projectId={activeProjectId}

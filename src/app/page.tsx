@@ -234,7 +234,6 @@ export default function SpatialWorkspacePage() {
       >
       <input ref={fileInputRef} type="file" accept=".glb,.gltf" onChange={handleFileChange} className="hidden" />
 
-      {/* 3D WebGL Canvas */}
       <div className="absolute inset-0 z-0">
         <StreetViewViewer
           modelUrl={modelUrl}
@@ -263,7 +262,6 @@ export default function SpatialWorkspacePage() {
         />
       </div>
 
-      {/* Full-Window Dragging Feedback Overlay */}
       {isDraggingFile && (
         <div className="absolute inset-0 pointer-events-none z-50 bg-[#070605]/80 backdrop-blur-md border-2 border-[#D4B483] shadow-[0_0_60px_rgba(212,180,131,0.25)_inset] m-6 rounded-3xl flex flex-col items-center justify-center gap-3">
           <Upload className="w-12 h-12 text-[#D4B483] animate-bounce" />
@@ -273,7 +271,6 @@ export default function SpatialWorkspacePage() {
         </div>
       )}
 
-      {/* LANDING STATE (!modelUrl) */}
       {!isModelLoaded ? (
         <div className="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-8">
           <header className="w-full flex items-center justify-between pointer-events-auto">
@@ -298,7 +295,6 @@ export default function SpatialWorkspacePage() {
             </div>
           </header>
 
-          {/* Title Header Block positioned in upper 11–14% of viewport so it never collides with 3D sculpture cube */}
           <div className="absolute top-[12%] left-0 right-0 flex flex-col items-center justify-center text-center pointer-events-none px-4">
             <span className="text-[10px] font-mono uppercase tracking-[0.35em] text-amber-400/70 block mb-2">
               PRIVATE SPATIAL VIEWING ROOM
@@ -327,11 +323,8 @@ export default function SpatialWorkspacePage() {
           </div>
         </div>
       ) : (
-        /* MODEL LOADED STATE: 4-STAGE ARCHITECTURAL FUNNEL */
         <>
-          {/* 1. Minimal Luxury Header (The Solenne — Brickell Bay) */}
           <header className="absolute top-6 left-8 right-8 z-20 flex items-center justify-between pointer-events-none">
-            {/* Left: Square Monogram [A] + Studio Title */}
             <div className="pointer-events-auto flex items-center gap-3">
               <div className="w-6 h-6 border border-[#D4B483]/60 bg-black/60 rounded flex items-center justify-center text-[11px] font-serif font-bold text-[#D4B483]">
                 A
@@ -341,7 +334,6 @@ export default function SpatialWorkspacePage() {
               </span>
             </div>
 
-            {/* Right: Minimal Action Pills */}
             <div className="pointer-events-auto flex items-center gap-2">
               {funnelStage === 'floorplan' && (
                 <button
@@ -394,7 +386,6 @@ export default function SpatialWorkspacePage() {
             </div>
           </header>
 
-          {/* Bottom-Left Status Prompt in Exterior Mode */}
           {funnelStage === 'exterior' && (
             <div className="pointer-events-none absolute bottom-8 left-8 z-20 flex items-center gap-2.5">
               <span className="w-2 h-2 rounded-full bg-[#E5C158] animate-ping" />
@@ -404,11 +395,9 @@ export default function SpatialWorkspacePage() {
             </div>
           )}
 
-          {/* 2. Right-Side Editorial Spec & Room Index Sheet (Stage 2 Floorplan Only) */}
           {funnelStage === 'floorplan' && (
             <aside className="absolute top-20 right-6 bottom-24 w-[340px] z-20 bg-[#0c0c0c]/90 backdrop-blur-2xl border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col justify-between overflow-y-auto animate-fade-in">
               <div className="flex flex-col gap-5">
-                {/* Header */}
                 <div className="border-b border-white/10 pb-4">
                   <span className="text-[10px] uppercase font-mono tracking-[0.25em] text-[#D4B483] block mb-1">
                     Architectural Monograph
@@ -421,7 +410,6 @@ export default function SpatialWorkspacePage() {
                   </p>
                 </div>
 
-                {/* Multi-Floor Selector Pills */}
                 {floors.length > 1 && (
                   <div className="flex flex-col gap-1.5">
                     <span className="text-[9px] uppercase font-mono tracking-widest text-zinc-500">
@@ -449,7 +437,6 @@ export default function SpatialWorkspacePage() {
                   </div>
                 )}
 
-                {/* Room Index List */}
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[9px] uppercase font-mono tracking-widest text-zinc-500">
@@ -491,7 +478,6 @@ export default function SpatialWorkspacePage() {
                   </div>
                 </div>
 
-                {/* Project Budget Card */}
                 <div className="p-4 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between">
                   <div>
                     <span className="text-[9px] uppercase font-mono text-zinc-500 block">
@@ -505,7 +491,6 @@ export default function SpatialWorkspacePage() {
                 </div>
               </div>
 
-              {/* Bottom Trigger */}
               <div className="pt-4 border-t border-white/10 flex flex-col gap-2">
                 <button
                   onClick={() => {
@@ -522,10 +507,8 @@ export default function SpatialWorkspacePage() {
             </aside>
           )}
 
-          {/* 3. Bottom Waypoint Navigation Dock */}
           {(funnelStage === 'room-view' || funnelStage === 'room-walk') && (
             <footer className="absolute bottom-6 left-6 right-6 z-20 flex items-center justify-between gap-4 pointer-events-none">
-              {/* Left: Back to Floorplan + Floor Switcher Pill */}
               <div className="pointer-events-auto flex items-center gap-2">
                 <button
                   onClick={() => setFunnelStage('floorplan')}
@@ -557,9 +540,7 @@ export default function SpatialWorkspacePage() {
                 </div>
               </div>
 
-              {/* Center: Sleek Horizontal Scrollable Dock of Numbered Waypoints + Prev/Next Buttons */}
               <div className="relative pointer-events-auto bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-2 flex items-center gap-2 shadow-2xl max-w-[55vw]">
-                {/* Floating Waypoint Hint */}
                 <div className="absolute -top-9 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-[#0a0a0a]/95 backdrop-blur-md border border-[#D4B483]/30 text-[9px] font-mono text-[#D4B483] uppercase tracking-wider flex items-center gap-1.5 pointer-events-none shadow-xl whitespace-nowrap">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                   Drag Mouse to Look 360° · Click Any Floor Waypoint or Dock to Glide
@@ -573,7 +554,6 @@ export default function SpatialWorkspacePage() {
                   <ChevronLeft className="w-4 h-4" />
                 </button>
 
-                {/* Horizontal Scrollable Waypoint Buttons */}
                 <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 px-1 max-w-[42vw]">
                   {floorRooms.map((wp) => {
                     const isSel = wp.id === activeRoomId;
@@ -603,7 +583,6 @@ export default function SpatialWorkspacePage() {
                 </button>
               </div>
 
-              {/* Right: Visual Polish Selector + Budget */}
               <div className="pointer-events-auto bg-[#0a0a0a]/90 backdrop-blur-xl border border-white/10 rounded-2xl p-1.5 flex items-center gap-2 shadow-2xl">
                 <div className="flex bg-black/40 p-0.5 rounded-xl border border-white/5 gap-1">
                   <button
@@ -645,7 +624,6 @@ export default function SpatialWorkspacePage() {
             </footer>
           )}
 
-          {/* Right-Hand Spatial Pin Inspector */}
           {selectedPin && (
             <aside className="absolute top-20 right-6 bottom-24 w-[340px] z-30 bg-[#0c0c0c]/95 backdrop-blur-2xl border border-white/10 rounded-2xl p-6 shadow-2xl flex flex-col justify-between overflow-y-auto animate-fade-in">
               <div className="flex flex-col gap-4">
@@ -730,7 +708,6 @@ export default function SpatialWorkspacePage() {
         </>
       )}
 
-      {/* Contract Sign-Off Modal */}
       {isSignOffOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-6">
           <div className="bg-[#121212] border border-white/15 rounded-3xl max-w-2xl w-full p-8 shadow-2xl flex flex-col gap-6 relative">
@@ -816,7 +793,6 @@ export default function SpatialWorkspacePage() {
         </div>
       )}
 
-      {/* Security & Access Code Modals */}
       <PinSetupModal
         isOpen={isPinSetupOpen}
         onClose={() => setIsPinSetupOpen(false)}
